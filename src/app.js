@@ -339,7 +339,14 @@ function vHome(){
       <li><b>Temuan</b> — lengkapi uraian temuan dan rencana tindakan korektif.</li>
       <li><b>Laporan</b> — tulis kesimpulan, lalu ekspor ke <b>Word</b> atau <b>PDF</b>.</li></ol>
     <p class="note" style="margin-top:10px">Butir checklist adalah parafrase berbahasa Indonesia dari persyaratan standar, bukan kutipan teks resmi. Gunakan dokumen standar resmi sebagai rujukan bunyi persyaratan.</p>
-  </div>`;
+  </div>
+  <p class="note" style="text-align:center;margin:4px 0 16px">Versi aplikasi: ${esc(appVersionText())}</p>`;
+}
+function appVersionText(){
+  const m = document.querySelector('meta[name=build]'), s = m ? m.content : '';
+  if (!/^\d{14}$/.test(s)) return '(belum ada penanda versi)';
+  const d = new Date(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8), +s.slice(8, 10), +s.slice(10, 12));
+  return d.toLocaleDateString('id-ID', { day:'numeric', month:'long', year:'numeric' }) + ', pukul ' + s.slice(8, 10) + '.' + s.slice(10, 12);
 }
 
 /* ---------------- view: profil ---------------- */

@@ -7,6 +7,7 @@ Hasil:
 URL backend Apps Script (bukan kode akses) dibaca dari src/config.json bila ada:
   { "cloudUrl": "https://script.google.com/macros/s/.../exec" }
 """
+import datetime
 import json
 import pathlib
 
@@ -26,6 +27,10 @@ guide = '\n'.join(read(f) for f in ('guide_a.js', 'guide_b.js', 'guide_c.js', 'g
 html = html.replace('/*__GUIDE__*/', guide)
 html = html.replace('/*__APP__*/', config_js + read('cloud.js') + '\n' + read('app.js'))
 
+# Penanda versi build: dipakai untuk memastikan GitHub Pages sudah menayangkan versi terbaru.
+stamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+html = html.replace('<head>', '<head>\n<meta name="build" content="' + stamp + '">', 1)
+
 for name in ('Aplikasi Audit ISO 21001.html', 'index.html'):
     (root / name).write_text(html, encoding='utf-8')
-print('OK', len(html) // 1024, 'KB ->', 'Aplikasi Audit ISO 21001.html, index.html')
+print('OK', len(html) // 1024, 'KB ->', 'Aplikasi Audit ISO 21001.html, index.html', '| build', stamp)
