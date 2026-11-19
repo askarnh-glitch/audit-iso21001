@@ -1,0 +1,14 @@
+# Dokumen standar berlisensi & peraturan (tidak boleh diunggah)
+*.pdf
+
+# Rahasia backend (kode akses & ID folder)
+KONFIGURASI-RAHASIA.txt
+backend/Code-SIAP-PAKAI.gs
+
+# Catatan kerja & pengaturan lokal
+RINGKASAN-PROYEK.md
+.claude/
+__pycache__/
+
+# Salinan offline (isinya sama dengan index.html)
+Aplikasi Audit ISO 21001.html

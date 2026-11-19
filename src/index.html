@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Audit ISO 21001</title>
+<script>
+/* terapkan tema sedini mungkin agar tidak berkedip */
+(function(){
+  var ui = {}; try { ui = JSON.parse(localStorage.getItem('iso21001_audit_ui_v1') || '{}') || {}; } catch (e) {}
+  var m = ui.themeMode || 'light';
+  if (m === 'auto') m = (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-theme', m);
+  document.documentElement.setAttribute('data-accent', ui.accent || 'navy');
+})();
+</script>
+<style>
+/*__CSS__*/
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="top-row">
+      <div class="brand"><span class="logo">21001</span> Audit SMOP ISO 21001</div>
+      <div class="cur" id="cur"></div>
+      <div class="saved" id="saved"></div>
+      <div class="theme-wrap">
+        <button class="theme-btn" id="themeBtn" aria-haspopup="true" aria-expanded="false" title="Ubah tema tampilan">🎨 Tema</button>
+        <div class="theme-pop hidden" id="themePop" role="dialog" aria-label="Pilihan tema"></div>
+      </div>
+    </div>
+    <nav class="tabs">
+      <button class="tab" data-view="home">Beranda</button>
+      <button class="tab" data-view="profil">1 · Profil Audit</button>
+      <button class="tab" data-view="checklist">2 · Checklist</button>
+      <button class="tab" data-view="temuan">3 · Temuan</button>
+      <button class="tab" data-view="laporan">4 · Laporan &amp; Ekspor</button>
+      <button class="tab" data-view="beda">Perbedaan 2018 ↔ 2025</button>
+      <button class="tab" data-view="singkatan">Singkatan</button>
+    </nav>
+  </header>
+  <main id="main"></main>
+</div>
+<div id="printArea"></div>
+<div class="toast" id="toast"></div>
+<script>
+/*__DATA__*/
+</script>
+<script>
+/*__GUIDE__*/
+</script>
+<script>
+/*__APP__*/
+</script>
+</body>
+</html>
