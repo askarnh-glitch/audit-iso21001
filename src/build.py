@@ -19,6 +19,7 @@ cfg = {}
 if (src / 'config.json').exists():
     cfg = json.loads(read('config.json'))
 config_js = 'const CLOUD_URL_DEFAULT = ' + json.dumps(cfg.get('cloudUrl', '')) + ';\n'
+config_js += 'const GOOGLE_CLIENT_ID = ' + json.dumps(cfg.get('googleClientId', '')) + ';\n'
 
 html = read('index.html')
 html = html.replace('/*__CSS__*/', read('style.css'))

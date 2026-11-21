@@ -5,36 +5,47 @@
  * Ringkasan audit (nama, versi, revisi, waktu simpan) disimpan di deskripsi file
  * agar daftar audit bisa dimuat tanpa membuka isi setiap file.
  *
+ * Login: "Masuk dengan Google". Aplikasi mengirim ID token Google (aksi "login"),
+ * backend memeriksanya ke Google dan hanya menerima akun PEMILIK folder database
+ * (akun yang memiliki aplikasi ini). Setelah itu backend memberi token sesi
+ * 90 hari yang disimpan di browser. Tidak ada kode akses lagi.
+ *
  * Cara pasang (ringkas):
- *  1. Buat project baru di https://script.google.com, tempel seluruh isi file ini.
- *  2. Isi FOLDER_ID dan ACCESS_KEY pada fungsi aturKonfigurasi(), lalu jalankan sekali.
- *  3. Deploy > Deployment baru > Aplikasi web: Jalankan sebagai "Saya", Akses "Siapa saja".
- *  4. Salin URL aplikasi web ke aplikasi audit (kartu Penyimpanan Online).
+ *  1. Tempel seluruh isi file ini di project Apps Script.
+ *  2. Properti skrip FOLDER_ID sudah ada (folder database). Tidak perlu diubah.
+ *  3. Jalankan fungsi izinkanAkses() sekali dan setujui izin (Drive + akses internet).
+ *  4. Terapkan > Kelola deployment > Edit > Versi baru > Terapkan
+ *     (Jalankan sebagai "Saya", Akses "Siapa saja").
  */
 
-function aturKonfigurasi() {
-  var FOLDER_ID = 'ISI_ID_FOLDER_DRIVE';
-  var ACCESS_KEY = 'ISI_KODE_AKSES';
-  var folder = DriveApp.getFolderById(FOLDER_ID); // sekaligus meminta izin akses Drive
-  PropertiesService.getScriptProperties().setProperties({ FOLDER_ID: FOLDER_ID, ACCESS_KEY: ACCESS_KEY });
-  Logger.log('Konfigurasi tersimpan. Folder database: ' + folder.getName());
+/* Client ID OAuth (Google Cloud Console > Klien > Aplikasi web). Bukan rahasia. */
+var GOOGLE_CLIENT_ID = '236145262919-mgu0dpco58uc2esi5766cavo7mesh6rb.apps.googleusercontent.com';
+var SESI_HARI = 90;
+
+function izinkanAkses() {
+  var folder = DriveApp.getFolderById(PropertiesService.getScriptProperties().getProperty('FOLDER_ID'));
+  UrlFetchApp.fetch('https://oauth2.googleapis.com/tokeninfo?id_token=cek', { muteHttpExceptions: true });
+  Logger.log('Izin lengkap. Folder database: ' + folder.getName() + '. Pemilik: ' + pemilik_(PropertiesService.getScriptProperties()));
 }
 
 function doGet() {
-  return out_({ ok: true, app: 'audit-iso21001', pesan: 'Backend aktif. Gunakan dari aplikasi audit.' });
+  return out_({ ok: true, app: 'audit-iso21001', login: 'google', pesan: 'Backend aktif. Gunakan dari aplikasi audit.' });
 }
 
 function doPost(e) {
   var req;
   try { req = JSON.parse(e.postData.contents); } catch (err) { return out_({ ok: false, error: 'bad_request' }); }
   var props = PropertiesService.getScriptProperties();
-  var key = props.getProperty('ACCESS_KEY');
-  if (!key || req.key !== key) return out_({ ok: false, error: 'unauthorized' });
-  var folder = DriveApp.getFolderById(props.getProperty('FOLDER_ID'));
 
   try {
+    if (req.action === 'login') return out_(login_(props, req.idToken));
+    var sesi = sesi_(props, req.session);
+    if (!sesi) return out_({ ok: false, error: 'unauthorized' });
+    if (req.action === 'logout') { props.deleteProperty('S_' + hash_(req.session)); return out_({ ok: true }); }
+
+    var folder = DriveApp.getFolderById(props.getProperty('FOLDER_ID'));
     switch (req.action) {
-      case 'ping': return out_({ ok: true, folder: folder.getName() });
+      case 'ping': return out_({ ok: true, folder: folder.getName(), email: sesi.email, name: sesi.name });
       case 'list': return out_({ ok: true, items: list_(folder) });
       case 'get': return out_(get_(folder, req.id));
       case 'save': return withLock_(function () { return save_(folder, req); });
@@ -44,6 +55,60 @@ function doPost(e) {
   } catch (err) {
     return out_({ ok: false, error: 'server', detail: String(err && err.message || err) });
   }
+}
+
+/* ---------------- login & sesi ---------------- */
+function login_(props, idToken) {
+  if (!idToken || typeof idToken !== 'string' || idToken.length > 4096) return { ok: false, error: 'unauthorized' };
+  var r = UrlFetchApp.fetch('https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(idToken), { muteHttpExceptions: true });
+  if (r.getResponseCode() !== 200) return { ok: false, error: 'unauthorized' };
+  var t = JSON.parse(r.getContentText());
+  var pemilik = pemilik_(props);
+  var email = String(t.email || '').toLowerCase();
+  var sah = t.aud === GOOGLE_CLIENT_ID &&
+    (t.iss === 'accounts.google.com' || t.iss === 'https://accounts.google.com') &&
+    String(t.email_verified) === 'true' && Number(t.exp) * 1000 > Date.now();
+  if (!sah) return { ok: false, error: 'unauthorized' };
+  if (!pemilik || email !== pemilik) return { ok: false, error: 'not_owner', email: email };
+
+  bersihkanSesi_(props);
+  var token = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
+  var exp = Date.now() + SESI_HARI * 86400000;
+  var name = String(t.name || t.given_name || '').slice(0, 60);
+  props.setProperty('S_' + hash_(token), JSON.stringify({ email: email, name: name, exp: exp }));
+  return { ok: true, session: token, email: email, name: name, exp: exp };
+}
+
+/* Pemilik aplikasi = pemilik folder database (tidak butuh izin tambahan selain Drive). */
+function pemilik_(props) {
+  var p = props.getProperty('PEMILIK');
+  if (!p) {
+    var o = DriveApp.getFolderById(props.getProperty('FOLDER_ID')).getOwner();
+    p = String(o ? o.getEmail() : '').toLowerCase();
+    if (p) props.setProperty('PEMILIK', p);
+  }
+  return p;
+}
+
+function sesi_(props, token) {
+  if (!token || typeof token !== 'string' || token.length > 200) return null;
+  var raw = props.getProperty('S_' + hash_(token));
+  if (!raw) return null;
+  var s = JSON.parse(raw);
+  if (!s.exp || s.exp < Date.now()) { props.deleteProperty('S_' + hash_(token)); return null; }
+  return s;
+}
+
+function bersihkanSesi_(props) {
+  var all = props.getProperties(), now = Date.now();
+  Object.keys(all).forEach(function (k) {
+    if (k.indexOf('S_') !== 0) return;
+    try { if (JSON.parse(all[k]).exp < now) props.deleteProperty(k); } catch (e) { props.deleteProperty(k); }
+  });
+}
+
+function hash_(s) {
+  return Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, s, Utilities.Charset.UTF_8)).replace(/=+$/, '');
 }
 
 /* ---------------- operasi ---------------- */

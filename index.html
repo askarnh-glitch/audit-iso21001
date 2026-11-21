@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="id">
 <head>
-<meta name="build" content="20261122051514">
+<meta name="build" content="20261122053901">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Audit ISO 21001</title>
@@ -4869,6 +4869,7 @@ K('A.11', [
 </script>
 <script>
 const CLOUD_URL_DEFAULT = "https://script.google.com/macros/s/AKfycbwD29Qi2ER5psz4QLkdoVrrkr-_Ogoj8uvSA2-GLDpDZJN0-gGCtGwmx1jHSrAOdaJGEw/exec";
+const GOOGLE_CLIENT_ID = "236145262919-mgu0dpco58uc2esi5766cavo7mesh6rb.apps.googleusercontent.com";
 /* =====================================================================
    PENYIMPANAN ONLINE — Google Drive melalui Google Apps Script
    Data tetap disimpan di browser (cadangan offline); setiap perubahan
@@ -4876,31 +4877,42 @@ const CLOUD_URL_DEFAULT = "https://script.google.com/macros/s/AKfycbwD29Qi2ER5ps
    dengan nomor revisi per audit.
    ===================================================================== */
 const CLOUD_LS = 'iso21001_cloud_v1';
-let CL = { url:'', key:'', who:'', on:false, rev:{}, dirty:[], meta:{} };
+/* Login: "Masuk dengan Google". Backend memeriksa akun Google lalu memberi token sesi
+   (90 hari) yang disimpan di browser ini. Tidak ada kode akses. */
+let CL = { url:'', session:'', email:'', who:'', on:false, rev:{}, dirty:[], meta:{} };
 const CLS = { busy:false, err:'', conflict:null, timer:null, loading:false, listAt:0 };
 try { const c = JSON.parse(localStorage.getItem(CLOUD_LS) || 'null'); if (c) CL = Object.assign(CL, c); } catch (e) { /* abaikan */ }
-if (!CL.url && typeof CLOUD_URL_DEFAULT !== 'undefined') CL.url = CLOUD_URL_DEFAULT;
+if (typeof CLOUD_URL_DEFAULT !== 'undefined' && CLOUD_URL_DEFAULT) CL.url = CLOUD_URL_DEFAULT;
+delete CL.key; // kode akses lama tidak dipakai lagi
 
 function clSave(){ try { localStorage.setItem(CLOUD_LS, JSON.stringify(CL)); } catch (e) { /* abaikan */ } }
-function cloudOn(){ return !!(CL.on && CL.url && CL.key); }
+function cloudOn(){ return !!(CL.on && CL.url && CL.session); }
+const CL_ONLINE = 'https://askarnh-glitch.github.io/audit-iso21001/';
+function clCanGoogle(){ return /^https?:$/.test(location.protocol) && typeof GOOGLE_CLIENT_ID !== 'undefined' && !!GOOGLE_CLIENT_ID; }
 
 async function clApi(action, payload){
   const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 45000);
   let r;
   try {
-    r = await fetch(CL.url, { method:'POST', body:JSON.stringify(Object.assign({ action, key:CL.key }, payload || {})), signal:ctl.signal });
+    r = await fetch(CL.url, { method:'POST', body:JSON.stringify(Object.assign({ action, session:CL.session }, payload || {})), signal:ctl.signal });
   } catch (e) { throw Object.assign(new Error('network'), { code:'network' }); }
   finally { clearTimeout(t); }
   if (!r.ok) throw Object.assign(new Error('http'), { code:'http' });
   let j; try { j = await r.json(); } catch (e) { throw Object.assign(new Error('parse'), { code:'parse' }); }
-  if (!j.ok) throw Object.assign(new Error(j.error || 'error'), { code:j.error || 'error', res:j });
+  if (!j.ok) {
+    if (j.error === 'unauthorized' && action !== 'login' && CL.session) {
+      CL.session = ''; clSave(); setTimeout(() => { clShow(); if (VIEW === 'home') render(); }, 0);
+    }
+    throw Object.assign(new Error(j.error || 'error'), { code:j.error || 'error', res:j });
+  }
   return j;
 }
 function clErrText(e){
   return ({
     network:'Tidak dapat terhubung ke Drive (periksa internet)',
-    unauthorized:'Kode akses salah',
-    parse:'URL bukan backend aplikasi ini, atau aksesnya belum "Siapa saja"',
+    unauthorized:'Sesi berakhir, silakan masuk lagi dengan Google',
+    not_owner:'Akun Google ' + ((e.res && e.res.email) || 'ini') + ' tidak diizinkan. Masuk dengan akun pemilik aplikasi',
+    parse:'Backend Drive belum diperbarui atau aksesnya belum "Siapa saja"',
     http:'Server Drive menolak permintaan',
     busy:'Server sedang sibuk, dicoba lagi',
     not_found:'Audit tidak ditemukan di Drive'
@@ -4915,11 +4927,14 @@ function clStatusText(){
   if (CL.dirty.length) return '☁ Menunggu sinkron ke Drive…';
   return '☁ Tersimpan di Drive';
 }
-function clShow(){ if (cloudOn()) setSaved(clStatusText()); }
+function clShow(){
+  if (cloudOn()) setSaved(clStatusText());
+  else if (CL.on) setSaved('⚠ Belum masuk Google — tersimpan di browser');
+}
 
 /* ---------------- kirim perubahan ---------------- */
 function cloudMarkDirty(id){
-  if (!cloudOn() || !id) return;
+  if (!CL.on || !id) return; // tetap dicatat walau sesi berakhir; terkirim setelah masuk lagi
   if (!CL.dirty.includes(id)) CL.dirty.push(id);
   clSave(); clSchedule(2500);
 }
@@ -4941,7 +4956,7 @@ async function clPush(){
       else retry = true;
     } catch (e) {
       if (e.code === 'conflict') { CLS.conflict = { id, meta:(e.res && e.res.meta) || null }; break; }
-      CLS.err = clErrText(e); retry = true; break;
+      CLS.err = clErrText(e); retry = e.code !== 'unauthorized'; break;
     }
   }
   CLS.busy = false; clSave(); clShow();
@@ -5038,62 +5053,54 @@ function clBannerHTML(){
       <button class="btn danger" data-act="clRes" data-v="mine">Timpa Drive dengan versi saya</button></div></div>`;
 }
 
-/* ---------------- hubungkan / putuskan ---------------- */
-async function cloudConnect(){
-  const url = ($('#clUrl').value || '').trim(), key = ($('#clKey').value || '').trim(), who = ($('#clWho').value || '').trim();
-  if (!/^https:\/\/script\.google(usercontent)?\.com\//.test(url)) { alert('Isi URL aplikasi web Apps Script (diawali https://script.google.com/…).'); return; }
-  if (!key) { alert('Isi kode akses.'); return; }
-  await clConnectWith(url, key, who);
+/* ---------------- masuk / keluar (Google) ---------------- */
+let GSI_READY = false;
+function clLoadGsi(){
+  if (window.google && google.accounts && google.accounts.id) { clInitGsi(); return; }
+  if (document.getElementById('gsiScript')) return;
+  const s = document.createElement('script');
+  s.src = 'https://accounts.google.com/gsi/client'; s.async = true; s.id = 'gsiScript';
+  s.onload = clInitGsi;
+  s.onerror = () => { const el = document.getElementById('gsiBtn'); if (el) el.textContent = 'Layanan login Google tidak dapat dimuat (periksa internet).'; };
+  document.head.appendChild(s);
 }
-async function clConnectWith(url, key, who){
-  const old = { url:CL.url, key:CL.key, on:CL.on, who:CL.who };
-  CL.url = url; CL.key = key; CL.who = who;
-  toast('Menghubungkan ke Drive…');
+function clInitGsi(){
+  if (!GSI_READY) {
+    google.accounts.id.initialize({ client_id:GOOGLE_CLIENT_ID, callback:clOnCredential, auto_select:true,
+      cancel_on_tap_outside:true, use_fedcm_for_prompt:true, context:'signin' });
+    GSI_READY = true;
+    if (!cloudOn()) { try { google.accounts.id.prompt(); } catch (e) { /* abaikan */ } }
+  }
+  clRenderGsi();
+}
+function clRenderGsi(){
+  const el = document.getElementById('gsiBtn');
+  if (!el || !GSI_READY || el.dataset.done) return;
+  el.dataset.done = '1';
+  google.accounts.id.renderButton(el, { theme:'outline', size:'large', text:'signin_with', shape:'pill', locale:'id' });
+}
+async function clOnCredential(resp){
+  if (!resp || !resp.credential) return;
+  if (typeof CLOUD_URL_DEFAULT !== 'undefined' && CLOUD_URL_DEFAULT) CL.url = CLOUD_URL_DEFAULT;
+  toast('Memeriksa akun Google…');
   try {
-    const j = await clApi('ping');
-    CL.on = true; CLS.err = ''; clSave(); toast('Terhubung ke folder Drive “' + (j.folder || '') + '”');
+    const j = await clApi('login', { idToken:resp.credential });
+    CL.session = j.session; CL.email = j.email || ''; if (!CL.who) CL.who = j.name || '';
+    CL.on = true; CLS.err = ''; clSave();
+    toast('Masuk sebagai ' + (j.email || 'pemilik'));
     await cloudRefresh(true);
-    if (VIEW === 'home') render();
-    return true;
+    if (CL.dirty.length) clSchedule(800);
+    const y = window.scrollY; render(); window.scrollTo(0, y);
   } catch (e) {
-    CL.url = old.url; CL.key = old.key; CL.on = old.on; CL.who = old.who; clSave();
-    alert('Gagal terhubung.\n' + clErrText(e)); return false;
+    alert('Gagal masuk.\n' + clErrText(e));
   }
 }
-
-/* ---------------- tautan masuk sekali klik ----------------
-   Bentuk: <alamat aplikasi>#masuk=<kode akses>
-   Bagian setelah # tidak pernah dikirim ke server GitHub. Kode langsung dihapus dari
-   bilah alamat dan riwayat browser begitu halaman dibuka. */
-const CL_ONLINE = 'https://askarnh-glitch.github.io/audit-iso21001/';
-function clTakeHashKey(){
-  const h = location.hash || '';
-  if (!/^#masuk=/.test(h)) return '';
-  let key = '';
-  try { key = decodeURIComponent(h.slice(7)).trim(); } catch (e) { key = ''; }
-  try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { location.hash = ''; }
-  return key;
-}
-async function clLoginFromHash(key){
-  const url = CL.url || (typeof CLOUD_URL_DEFAULT !== 'undefined' ? CLOUD_URL_DEFAULT : '');
-  if (!url) { alert('Alamat backend Drive belum diatur di aplikasi ini.'); return; }
-  if (cloudOn() && CL.key === key) { toast('Sudah terhubung ke Drive'); clShow(); cloudRefresh(true); if (CL.dirty.length) clSchedule(1500); return; }
-  let who = CL.who;
-  if (!who) who = (prompt('Nama Anda (tercatat sebagai penyimpan terakhir audit). Boleh dikosongkan:', '') || '').trim().slice(0, 60);
-  if (await clConnectWith(url, key, who) && CL.dirty.length) clSchedule(1500);
-}
-async function clCopyLink(){
-  if (!cloudOn()) return;
-  if (!confirm('Tautan masuk berisi kode akses Drive.\n\nSiapa pun yang memegang tautan ini dapat membuka, mengubah, dan menghapus audit di Drive. Simpan sebagai bookmark atau bagikan hanya kepada auditor yang Anda percaya, jangan di grup terbuka.\n\nSalin tautan?')) return;
-  const base = /^https?:$/.test(location.protocol) ? location.origin + location.pathname : CL_ONLINE;
-  const link = base + '#masuk=' + encodeURIComponent(CL.key);
-  try { await navigator.clipboard.writeText(link); toast('Tautan masuk disalin'); }
-  catch (e) { prompt('Salin tautan masuk ini (Ctrl+C):', link); }
-}
-function cloudDisconnect(){
-  if (CL.dirty.length && !confirm('Masih ada perubahan yang belum terkirim ke Drive. Putuskan juga? Perubahan tetap tersimpan di browser ini.')) return;
-  CL.on = false; CL.key = ''; CLS.err = ''; CLS.conflict = null; clSave();
-  setSaved('Tersimpan di browser'); render(); toast('Penyimpanan online diputuskan');
+async function cloudLogout(){
+  if (CL.dirty.length && !confirm('Masih ada perubahan yang belum terkirim ke Drive. Keluar juga? Perubahan tetap tersimpan di browser ini.')) return;
+  try { await clApi('logout'); } catch (e) { /* sesi mungkin sudah berakhir */ }
+  CL.session = ''; CL.on = false; CLS.err = ''; CLS.conflict = null; clSave();
+  try { google.accounts.id.disableAutoSelect(); } catch (e) { /* abaikan */ }
+  setSaved('Tersimpan di browser'); render(); toast('Anda sudah keluar dari Drive');
 }
 function cloudUpload(ids){
   ids.forEach(id => { if (DB.audits[id] && !CL.dirty.includes(id)) CL.dirty.push(id); });
@@ -5104,20 +5111,21 @@ function clLocalOnly(){ return Object.keys(DB.audits).filter(id => !CL.meta[id] 
 /* ---------------- tampilan di Beranda ---------------- */
 function clCardHTML(){
   if (!cloudOn()) {
+    if (!clCanGoogle()) {
+      return `<div class="card"><h3>☁ Penyimpanan Online (Google Drive)</h3>
+        <p class="sub">Login Google hanya tersedia di versi online: <a href="${CL_ONLINE}" target="_blank" rel="noopener">${CL_ONLINE}</a>. Di file offline ini audit tetap tersimpan otomatis di browser; gunakan <b>Simpan File</b> untuk cadangan.</p></div>`;
+    }
+    const habis = CL.on && !CL.session;
     return `<div class="card"><h3>☁ Penyimpanan Online (Google Drive)</h3>
-      <p class="sub">Hubungkan agar audit tersimpan di folder Drive bersama dan dapat dibuka auditor lain dari komputer mana pun. Minta URL dan kode akses kepada pengelola aplikasi. Bila Anda menerima <b>tautan masuk</b>, cukup buka tautan itu; aplikasi tersambung sendiri.</p>
-      <div class="grid g2">
-        <div><label class="f">URL aplikasi web (Apps Script)</label><input class="inp" id="clUrl" value="${esc(CL.url)}" placeholder="https://script.google.com/macros/s/…/exec"></div>
-        <div><label class="f">Kode akses</label><input class="inp" id="clKey" type="password" autocomplete="off" placeholder="diberikan pengelola"></div>
-        <div><label class="f">Nama Anda (tercatat sebagai penyimpan terakhir)</label><input class="inp" id="clWho" value="${esc(CL.who)}" placeholder="mis. Auditor Ketua"></div>
-        <div style="align-self:end"><button class="btn pri" data-act="clConnect">Hubungkan</button></div></div></div>`;
+      <p class="sub">${habis ? '<b>Sesi Drive Anda berakhir.</b> Perubahan tetap aman di browser ini dan akan dikirim setelah Anda masuk lagi.' : 'Masuk dengan akun Google pemilik aplikasi agar audit tersimpan di Drive dan semua riwayat audit dari perangkat lain muncul di sini.'}</p>
+      <div class="row" style="gap:10px;margin-top:8px"><div id="gsiBtn" style="min-height:44px">Memuat tombol login Google…</div></div>
+      <p class="note" style="margin-top:6px">Hanya akun pemilik yang diterima. Setelah masuk, perangkat ini diingat selama 90 hari.</p></div>`;
   }
   const lo = clLocalOnly().length;
   return `<div class="card"><div class="row"><h3 style="margin:0">☁ Penyimpanan Online — terhubung</h3><span class="spacer"></span>
       <button class="btn sm" data-act="clRefresh">${CLS.loading ? 'Memuat…' : '↻ Muat ulang daftar'}</button>
-      <button class="btn sm" data-act="clLink" title="Tautan yang langsung menyambungkan aplikasi ke Drive tanpa mengetik kode akses">🔗 Salin tautan masuk</button>
-      <button class="btn sm" data-act="clDisconnect">Putuskan</button></div>
-    <p class="note" style="margin-top:6px">Status: <b>${esc(clStatusText())}</b>${CL.who ? ' · Anda tercatat sebagai <b>' + esc(CL.who) + '</b>' : ''}. Perubahan dikirim otomatis ke Drive beberapa detik setelah mengetik; salinan juga disimpan di browser untuk dipakai saat offline.</p>
+      <button class="btn sm" data-act="clLogout">Keluar</button></div>
+    <p class="note" style="margin-top:6px">Masuk sebagai <b>${esc(CL.email || '(akun Google)')}</b> · Status: <b>${esc(clStatusText())}</b>. Perubahan dikirim otomatis ke Drive beberapa detik setelah mengetik; salinan juga disimpan di browser untuk dipakai saat offline.</p>
     ${lo ? `<div class="row" style="margin-top:8px"><span class="note">${lo} audit hanya ada di browser ini (belum di Drive).</span><button class="btn sm" data-act="clUploadAll">Unggah semuanya ke Drive</button></div>` : ''}</div>`;
 }
 function clBadge(id){
@@ -5139,10 +5147,8 @@ function clServerOnlyRows(){
 document.addEventListener('click', e => {
   const b = e.target.closest('[data-act]'); if (!b) return;
   switch (b.dataset.act) {
-    case 'clConnect': cloudConnect(); break;
-    case 'clDisconnect': cloudDisconnect(); break;
+    case 'clLogout': cloudLogout(); break;
     case 'clRefresh': cloudRefresh(true); break;
-    case 'clLink': clCopyLink(); break;
     case 'clUpload': cloudUpload([b.dataset.id]); break;
     case 'clUploadAll': cloudUpload(clLocalOnly()); break;
     case 'clRes': cloudResolve(b.dataset.v); break;
@@ -5150,10 +5156,13 @@ document.addEventListener('click', e => {
 });
 window.addEventListener('online', () => { if (cloudOn()) { CLS.err = ''; clSchedule(500); } });
 
+/* tombol login Google digambar ulang setiap kali Beranda dirender */
+new MutationObserver(() => { if (GSI_READY) clRenderGsi(); }).observe(document.documentElement, { childList:true, subtree:true });
+
 function cloudInit(){
-  const hk = clTakeHashKey();
-  if (hk) { clLoginFromHash(hk); return; }
-  if (!cloudOn()) return;
+  if (/^#masuk=/.test(location.hash)) { try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* abaikan */ } }
+  if (clCanGoogle()) clLoadGsi();
+  if (!cloudOn()) { clShow(); return; }
   clShow(); cloudRefresh(true);
   if (CL.dirty.length) clSchedule(1500);
 }
