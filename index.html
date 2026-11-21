@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="id">
 <head>
-<meta name="build" content="20261122053901">
+<meta name="build" content="20261122054328">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Audit ISO 21001</title>
@@ -5097,10 +5097,21 @@ async function clOnCredential(resp){
 }
 async function cloudLogout(){
   if (CL.dirty.length && !confirm('Masih ada perubahan yang belum terkirim ke Drive. Keluar juga? Perubahan tetap tersimpan di browser ini.')) return;
+  // Audit yang sudah aman di Drive (tanpa perubahan tertunda) boleh dihapus dari browser ini.
+  const diDrive = Object.keys(DB.audits).filter(id => CL.meta[id] && !CL.dirty.includes(id));
+  const hapusLokal = diDrive.length > 0 && confirm('Hapus juga salinan ' + diDrive.length + ' audit dari browser ini?\n\n' +
+    'Disarankan bila komputer ini dipakai orang lain. Audit tetap aman di Google Drive dan muncul lagi setelah Anda login.\n\n' +
+    'OK = hapus dari browser ini · Batal = biarkan tersimpan di browser');
   try { await clApi('logout'); } catch (e) { /* sesi mungkin sudah berakhir */ }
-  CL.session = ''; CL.on = false; CLS.err = ''; CLS.conflict = null; clSave();
+  if (hapusLokal) {
+    diDrive.forEach(id => { delete DB.audits[id]; delete CL.rev[id]; });
+    if (DB.current && !DB.audits[DB.current]) DB.current = null;
+    persist();
+  }
+  CL.session = ''; CL.on = false; CL.meta = {}; CLS.err = ''; CLS.conflict = null; clSave();
   try { google.accounts.id.disableAutoSelect(); } catch (e) { /* abaikan */ }
-  setSaved('Tersimpan di browser'); render(); toast('Anda sudah keluar dari Drive');
+  setSaved('Tersimpan di browser'); go('home');
+  toast(hapusLokal ? 'Anda sudah keluar; salinan audit di browser ini dihapus' : 'Anda sudah keluar dari Drive');
 }
 function cloudUpload(ids){
   ids.forEach(id => { if (DB.audits[id] && !CL.dirty.includes(id)) CL.dirty.push(id); });
