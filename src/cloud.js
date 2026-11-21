@@ -172,14 +172,52 @@ async function cloudConnect(){
   const url = ($('#clUrl').value || '').trim(), key = ($('#clKey').value || '').trim(), who = ($('#clWho').value || '').trim();
   if (!/^https:\/\/script\.google(usercontent)?\.com\//.test(url)) { alert('Isi URL aplikasi web Apps Script (diawali https://script.google.com/…).'); return; }
   if (!key) { alert('Isi kode akses.'); return; }
-  const old = { url:CL.url, key:CL.key };
+  await clConnectWith(url, key, who);
+}
+async function clConnectWith(url, key, who){
+  const old = { url:CL.url, key:CL.key, on:CL.on, who:CL.who };
   CL.url = url; CL.key = key; CL.who = who;
   toast('Menghubungkan ke Drive…');
   try {
     const j = await clApi('ping');
     CL.on = true; CLS.err = ''; clSave(); toast('Terhubung ke folder Drive “' + (j.folder || '') + '”');
     await cloudRefresh(true);
-  } catch (e) { CL.url = old.url; CL.key = old.key; clSave(); alert('Gagal terhubung.\n' + clErrText(e)); }
+    if (VIEW === 'home') render();
+    return true;
+  } catch (e) {
+    CL.url = old.url; CL.key = old.key; CL.on = old.on; CL.who = old.who; clSave();
+    alert('Gagal terhubung.\n' + clErrText(e)); return false;
+  }
+}
+
+/* ---------------- tautan masuk sekali klik ----------------
+   Bentuk: <alamat aplikasi>#masuk=<kode akses>
+   Bagian setelah # tidak pernah dikirim ke server GitHub. Kode langsung dihapus dari
+   bilah alamat dan riwayat browser begitu halaman dibuka. */
+const CL_ONLINE = 'https://askarnh-glitch.github.io/audit-iso21001/';
+function clTakeHashKey(){
+  const h = location.hash || '';
+  if (!/^#masuk=/.test(h)) return '';
+  let key = '';
+  try { key = decodeURIComponent(h.slice(7)).trim(); } catch (e) { key = ''; }
+  try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { location.hash = ''; }
+  return key;
+}
+async function clLoginFromHash(key){
+  const url = CL.url || (typeof CLOUD_URL_DEFAULT !== 'undefined' ? CLOUD_URL_DEFAULT : '');
+  if (!url) { alert('Alamat backend Drive belum diatur di aplikasi ini.'); return; }
+  if (cloudOn() && CL.key === key) { toast('Sudah terhubung ke Drive'); clShow(); cloudRefresh(true); if (CL.dirty.length) clSchedule(1500); return; }
+  let who = CL.who;
+  if (!who) who = (prompt('Nama Anda (tercatat sebagai penyimpan terakhir audit). Boleh dikosongkan:', '') || '').trim().slice(0, 60);
+  if (await clConnectWith(url, key, who) && CL.dirty.length) clSchedule(1500);
+}
+async function clCopyLink(){
+  if (!cloudOn()) return;
+  if (!confirm('Tautan masuk berisi kode akses Drive.\n\nSiapa pun yang memegang tautan ini dapat membuka, mengubah, dan menghapus audit di Drive. Simpan sebagai bookmark atau bagikan hanya kepada auditor yang Anda percaya, jangan di grup terbuka.\n\nSalin tautan?')) return;
+  const base = /^https?:$/.test(location.protocol) ? location.origin + location.pathname : CL_ONLINE;
+  const link = base + '#masuk=' + encodeURIComponent(CL.key);
+  try { await navigator.clipboard.writeText(link); toast('Tautan masuk disalin'); }
+  catch (e) { prompt('Salin tautan masuk ini (Ctrl+C):', link); }
 }
 function cloudDisconnect(){
   if (CL.dirty.length && !confirm('Masih ada perubahan yang belum terkirim ke Drive. Putuskan juga? Perubahan tetap tersimpan di browser ini.')) return;
@@ -196,7 +234,7 @@ function clLocalOnly(){ return Object.keys(DB.audits).filter(id => !CL.meta[id] 
 function clCardHTML(){
   if (!cloudOn()) {
     return `<div class="card"><h3>☁ Penyimpanan Online (Google Drive)</h3>
-      <p class="sub">Hubungkan agar audit tersimpan di folder Drive bersama dan dapat dibuka auditor lain dari komputer mana pun. Minta URL dan kode akses kepada pengelola aplikasi.</p>
+      <p class="sub">Hubungkan agar audit tersimpan di folder Drive bersama dan dapat dibuka auditor lain dari komputer mana pun. Minta URL dan kode akses kepada pengelola aplikasi. Bila Anda menerima <b>tautan masuk</b>, cukup buka tautan itu; aplikasi tersambung sendiri.</p>
       <div class="grid g2">
         <div><label class="f">URL aplikasi web (Apps Script)</label><input class="inp" id="clUrl" value="${esc(CL.url)}" placeholder="https://script.google.com/macros/s/…/exec"></div>
         <div><label class="f">Kode akses</label><input class="inp" id="clKey" type="password" autocomplete="off" placeholder="diberikan pengelola"></div>
@@ -206,6 +244,7 @@ function clCardHTML(){
   const lo = clLocalOnly().length;
   return `<div class="card"><div class="row"><h3 style="margin:0">☁ Penyimpanan Online — terhubung</h3><span class="spacer"></span>
       <button class="btn sm" data-act="clRefresh">${CLS.loading ? 'Memuat…' : '↻ Muat ulang daftar'}</button>
+      <button class="btn sm" data-act="clLink" title="Tautan yang langsung menyambungkan aplikasi ke Drive tanpa mengetik kode akses">🔗 Salin tautan masuk</button>
       <button class="btn sm" data-act="clDisconnect">Putuskan</button></div>
     <p class="note" style="margin-top:6px">Status: <b>${esc(clStatusText())}</b>${CL.who ? ' · Anda tercatat sebagai <b>' + esc(CL.who) + '</b>' : ''}. Perubahan dikirim otomatis ke Drive beberapa detik setelah mengetik; salinan juga disimpan di browser untuk dipakai saat offline.</p>
     ${lo ? `<div class="row" style="margin-top:8px"><span class="note">${lo} audit hanya ada di browser ini (belum di Drive).</span><button class="btn sm" data-act="clUploadAll">Unggah semuanya ke Drive</button></div>` : ''}</div>`;
@@ -232,6 +271,7 @@ document.addEventListener('click', e => {
     case 'clConnect': cloudConnect(); break;
     case 'clDisconnect': cloudDisconnect(); break;
     case 'clRefresh': cloudRefresh(true); break;
+    case 'clLink': clCopyLink(); break;
     case 'clUpload': cloudUpload([b.dataset.id]); break;
     case 'clUploadAll': cloudUpload(clLocalOnly()); break;
     case 'clRes': cloudResolve(b.dataset.v); break;
@@ -240,6 +280,8 @@ document.addEventListener('click', e => {
 window.addEventListener('online', () => { if (cloudOn()) { CLS.err = ''; clSchedule(500); } });
 
 function cloudInit(){
+  const hk = clTakeHashKey();
+  if (hk) { clLoginFromHash(hk); return; }
   if (!cloudOn()) return;
   clShow(); cloudRefresh(true);
   if (CL.dirty.length) clSchedule(1500);
