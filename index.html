@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="id">
 <head>
-<meta name="build" content="20261122054328">
+<meta name="build" content="20261126051149">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Audit ISO 21001</title>
@@ -5436,10 +5436,20 @@ function render(){
   else if (VIEW === 'singkatan') m.innerHTML = vSingkatan();
   else if (VIEW === 'home' || !a) m.innerHTML = vHome();
   else if (VIEW === 'profil') m.innerHTML = vProfil(a);
-  else if (VIEW === 'checklist') m.innerHTML = vChecklist(a);
+  else if (VIEW === 'checklist') { const oldNav = m.querySelector('.nav'), navY = oldNav ? oldNav.scrollTop : 0; m.innerHTML = vChecklist(a); keepNavPos(m, navY); }
   else if (VIEW === 'temuan') m.innerHTML = vTemuan(a);
   else if (VIEW === 'laporan') m.innerHTML = vLaporan(a);
   const bn = clBannerHTML(); if (bn) m.insertAdjacentHTML('afterbegin', bn);
+}
+/* Daftar klausul di kiri: pertahankan posisi gulir setelah render, lalu pastikan klausul yang terbuka terlihat (di tengah bila sebelumnya di luar layar). */
+function keepNavPos(m, navY){
+  const nav = m.querySelector('.nav'); if (!nav) return;
+  nav.scrollTop = navY;
+  const on = nav.querySelector('button.on'); if (!on) return;
+  const nr = nav.getBoundingClientRect(), br = on.getBoundingClientRect();
+  const tools = nav.querySelector('.navtools'), topPad = tools ? tools.offsetHeight : 0;
+  if (br.top < nr.top + topPad || br.bottom > nr.bottom)
+    nav.scrollTop += (br.top - nr.top) - (nav.clientHeight - br.height) / 2;
 }
 const FREE_VIEWS = ['home', 'beda', 'singkatan'];
 let GL_Q = '', GL_CAT = '';
