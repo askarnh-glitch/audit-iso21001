@@ -610,10 +610,9 @@ function vChecklist(a){
         <div class="chead"><span class="cno">${cl.cond === 'q9' ? esc(Q9_LABEL) + ' · ' + esc(cl.no[a.versi].replace(' (9001)', '')) : esc(verLabel(a.versi)) + ' · ' + esc(cno(a, cl))}</span>
           <div class="ctitle"><h2>${esc(cl.t)}</h2>
             <div class="note">${s.total - s.none}/${s.total} butir dinilai${cl.no[otherV] !== cl.no[a.versi] ? ' · di ' + verLabel(otherV) + ': klausul ' + esc(cl.no[otherV]) : ''}${cl.cond === 'abk' ? ' · klausul kebutuhan khusus' : ''}${its.some(it => it.q9) ? ' · ' + its.filter(it => it.q9).length + ' butir tambahan ISO 9001' : ''}</div></div>
-          <div class="row" style="gap:6px"><span class="note">Tampilkan:</span>
-          <button class="btn sm tgl ${UI.gdDoc ? 'on' : ''}" data-act="gdTgl" data-v="gdDoc" title="Buka/tutup semua kotak dokumen">📄 Dokumen</button>
-          <button class="btn sm tgl ${UI.gdTek ? 'on' : ''}" data-act="gdTgl" data-v="gdTek" title="Buka/tutup semua kotak pertanyaan teknis">🛠 Teknis</button>
-          <button class="btn sm tgl ${UI.gdOps ? 'on' : ''}" data-act="gdTgl" data-v="gdOps" title="Buka/tutup semua kotak pertanyaan operasional">👥 Operasional</button>
+          <div class="row" style="gap:6px">          <button class="btn sm" data-act="gdTgl" data-v="gdDoc" title="Buka/tutup semua kotak dokumen sekaligus">📄 ${UI.gdDoc ? 'Tutup' : 'Buka'} dokumen</button>
+          <button class="btn sm" data-act="gdTgl" data-v="gdTek" title="Buka/tutup semua kotak pertanyaan teknis sekaligus">🛠 ${UI.gdTek ? 'Tutup' : 'Buka'} pertanyaan teknis</button>
+          <button class="btn sm" data-act="gdTgl" data-v="gdOps" title="Buka/tutup semua kotak pertanyaan operasional sekaligus">👥 ${UI.gdOps ? 'Tutup' : 'Buka'} pertanyaan operasional</button>
           <button class="btn sm" data-act="critAll">${UI.critOpen ? 'Tutup' : 'Buka'} panduan penilaian</button>
           <button class="btn sm" data-act="allc" data-k="${cl.k}" title="Isi semua butir yang belum dinilai dengan Sesuai">Belum dinilai → Sesuai</button></div></div>
         ${cl.chg && !/^Substansi sama/.test(cl.chg) ? `<div class="chg"><b>Perbedaan 2018 ↔ 2025:</b> ${ea(cl.chg)}</div>` : ''}
@@ -666,9 +665,8 @@ function vSite(a){
     </div>`;
   }).join('');
   const hasGuide = (b.cl.ind ? r.indikasi.rows : st.rows).some(x => (x.tek && x.tek.length) || (x.ops && x.ops.length) || x.kr);
-  const tools = hasGuide ? `<div class="row" style="gap:6px;margin-top:10px"><span class="note">Tampilkan:</span>
-      <button class="btn sm tgl ${UI.gdTek ? 'on' : ''}" data-act="gdTgl" data-v="gdTek" title="Buka/tutup semua kotak pertanyaan teknis">🛠 Teknis</button>
-      <button class="btn sm tgl ${UI.gdOps ? 'on' : ''}" data-act="gdTgl" data-v="gdOps" title="Buka/tutup semua kotak pertanyaan operasional">👥 Operasional</button>
+  const tools = hasGuide ? `<div class="row" style="gap:6px;margin-top:10px">      <button class="btn sm" data-act="gdTgl" data-v="gdTek" title="Buka/tutup semua kotak pertanyaan teknis sekaligus">🛠 ${UI.gdTek ? 'Tutup' : 'Buka'} pertanyaan teknis</button>
+      <button class="btn sm" data-act="gdTgl" data-v="gdOps" title="Buka/tutup semua kotak pertanyaan operasional sekaligus">👥 ${UI.gdOps ? 'Tutup' : 'Buka'} pertanyaan operasional</button>
       <button class="btn sm" data-act="critAll">${UI.critOpen ? 'Tutup' : 'Buka'} panduan penilaian</button></div>` : '';
   const prev = blocks[bi - 1], next = blocks[bi + 1];
   const info = b.cl.ind ? r.indikasi.intro : st.info;
