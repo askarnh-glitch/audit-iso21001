@@ -228,7 +228,41 @@ function stats(a){
   return { per, tot };
 }
 function pct(s){ const den = s.total - s.NA - s.none; return den > 0 ? Math.round((s.C + s.OBS + s.OFI) / den * 100) : null; }
-function progress(a){ const { tot } = stats(a); return tot.total ? Math.round((tot.total - tot.none) / tot.total * 100) : 0; }
+function progress(a){
+  // Audit dengan rencana per site: progres dihitung dari pertanyaan per site (tanpa potensi temuan situs).
+  const sb = siteBlocks(a).filter(b => !b.cl.ind);
+  if (sb.length) { let T = 0, D = 0; sb.forEach(b => b.its.forEach(it => { T++; if (peekR(a, b.cl.k, it.i).cat) D++; })); return T ? Math.round(D / T * 100) : 0; }
+  const { tot } = stats(a); return tot.total ? Math.round((tot.total - tot.none) / tot.total * 100) : 0;
+}
+
+/* ---------------- rencana audit per site (opsional, disimpan di data audit: a.rencana) ----------------
+   a.rencana = { petunjuk, sites:[{ id, no, nama, waktu, info, rows:[{ k, q, b }] }], indikasi:{ intro, rows:[{ site, t, k, v, kat }] } }
+   Hasil disimpan di a.res['S:<id site>'] dan a.res['S:ind'] dengan struktur yang sama seperti butir checklist. */
+const RC = a => (a && a.rencana && Array.isArray(a.rencana.sites) && a.rencana.sites.length) ? a.rencana : null;
+function siteBlocks(a){
+  const r = RC(a); if (!r) return [];
+  const out = r.sites.map((st, si) => ({ src:st, cl:{ k:'S:' + st.id, t:st.no + ' — ' + st.nama, no:{ 18:st.no, 25:st.no }, site:true, si },
+    its:(st.rows || []).map((x, n) => ({ i:n, text:x.q, ref:x.k, v:null, should:false })) }));
+  const ind = r.indikasi && Array.isArray(r.indikasi.rows) ? r.indikasi.rows : [];
+  if (ind.length) out.push({ src:r.indikasi, cl:{ k:'S:ind', t:'Potensi temuan dari situs resmi', no:{ 18:'Situs', 25:'Situs' }, site:true, ind:true, si:out.length },
+    its:ind.map((x, n) => ({ i:n, text:x.t, ref:x.k, v:null, should:false, siteName:x.site })) });
+  return out;
+}
+/** Teks Markdown sederhana (tebal, tautan, daftar butir) → HTML aman */
+function mdInline(t){
+  return esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (m, x, u) => `<a href="${u}" target="_blank" rel="noopener">${x}</a>`);
+}
+function mdLite(s){
+  let h = '', list = false;
+  for (const ln of String(s || '').split('\n')) {
+    if (/^\s*-\s+/.test(ln)) { if (!list) { h += '<ul>'; list = true; } h += '<li>' + mdInline(ln.replace(/^\s*-\s+/, '')) + '</li>'; continue; }
+    if (list) { h += '</ul>'; list = false; }
+    if (ln.trim()) h += '<p>' + mdInline(ln) + '</p>';
+  }
+  return h + (list ? '</ul>' : '');
+}
+const mdPlain = t => String(t || '').replace(/\*\*(.+?)\*\*/g, '$1').replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '$1 ($2)');
 
 function findings(a){
   const out = [];
@@ -238,6 +272,10 @@ function findings(a){
       if (r.cat && SEV[r.cat] !== undefined) out.push({ cl, it, idx, r, ci });
     });
   });
+  siteBlocks(a).forEach((b, bi) => b.its.forEach((it, idx) => {
+    const r = peekR(a, b.cl.k, it.i);
+    if (r.cat && SEV[r.cat] !== undefined) out.push({ cl:b.cl, it, idx, r, ci:10000 + bi });
+  }));
   out.sort((x, y) => SEV[x.r.cat] - SEV[y.r.cat] || x.ci - y.ci || x.idx - y.idx);
   const n = { KTS:0, OBS:0, OFI:0 };
   for (const f of out) {
@@ -248,7 +286,8 @@ function findings(a){
 }
 
 function autoRek(a){
-  const { tot } = stats(a);
+  // dihitung dari daftar temuan agar KTS dari pertanyaan per site ikut diperhitungkan
+  const tot = { MAJ:0, MIN:0 }; findings(a).forEach(f => { if (tot[f.r.cat] !== undefined) tot[f.r.cat]++; });
   if (tot.MAJ > 0) return 'Belum direkomendasikan — terdapat ' + tot.MAJ + ' KTS Mayor yang harus ditutup dan diverifikasi sebelum rekomendasi dapat diberikan.';
   if (tot.MIN > 0) return 'Direkomendasikan dengan syarat — ' + tot.MIN + ' KTS Minor harus ditindaklanjuti dengan rencana tindakan korektif yang disetujui dalam batas waktu yang disepakati.';
   return 'Direkomendasikan — ' + sysName(a) + ' dinilai telah sesuai dengan persyaratan ' + stdLabel(a) + ' dan diterapkan secara efektif.';
@@ -280,13 +319,16 @@ function render(){
   document.querySelectorAll('.tab').forEach(t => {
     t.classList.toggle('on', t.dataset.view === VIEW);
     t.disabled = !FREE_VIEWS.includes(t.dataset.view) && !a;
+    if (t.dataset.view === 'site') t.hidden = !RC(a);
   });
+  if (VIEW === 'site' && !RC(a)) VIEW = a ? 'checklist' : 'home';
   const m = $('#main');
   if (VIEW === 'beda') m.innerHTML = vBeda();
   else if (VIEW === 'singkatan') m.innerHTML = vSingkatan();
   else if (VIEW === 'home' || !a) m.innerHTML = vHome();
   else if (VIEW === 'profil') m.innerHTML = vProfil(a);
   else if (VIEW === 'checklist') { const oldNav = m.querySelector('.nav'), navY = oldNav ? oldNav.scrollTop : 0; m.innerHTML = vChecklist(a); keepNavPos(m, navY); }
+  else if (VIEW === 'site') { const oldNav = m.querySelector('.nav'), navY = oldNav ? oldNav.scrollTop : 0; m.innerHTML = vSite(a); keepNavPos(m, navY); }
   else if (VIEW === 'temuan') m.innerHTML = vTemuan(a);
   else if (VIEW === 'laporan') m.innerHTML = vLaporan(a);
   const bn = clBannerHTML(); if (bn) m.insertAdjacentHTML('afterbegin', bn);
@@ -586,6 +628,92 @@ function vChecklist(a){
     </section></div>`;
 }
 
+/* ---------------- view: per site ---------------- */
+let CUR_SITE = null;
+function siteCount(a, b){
+  const s = { C:0, OBS:0, OFI:0, MIN:0, MAJ:0, NA:0, none:0, total:b.its.length };
+  b.its.forEach(it => { const c = peekR(a, b.cl.k, it.i).cat; if (c && s[c] !== undefined) s[c]++; else s.none++; });
+  return s;
+}
+function vSite(a){
+  const r = RC(a), blocks = siteBlocks(a);
+  if (!CUR_SITE || !blocks.find(b => b.cl.k === CUR_SITE)) CUR_SITE = blocks[0].cl.k;
+  const bi = blocks.findIndex(b => b.cl.k === CUR_SITE), b = blocks[bi], st = b.src;
+  const nav = `<div class="gh">Rencana audit per site</div>` + blocks.map(bb => {
+    const s = siteCount(a, bb), dot = s.MAJ ? 'maj' : s.MIN ? 'min' : s.OBS ? 'obs' : s.OFI ? 'ofi' : '', done = s.none === 0;
+    return `<button class="${bb.cl.k === CUR_SITE ? 'on' : ''}" data-act="site" data-k="${esc(bb.cl.k)}" title="${esc(bb.cl.t)}">
+      <span class="no">${esc(bb.cl.ind ? 'Situs' : bb.src.no.replace(/^Site\s*/i, 'S'))}</span><span class="tt">${esc(bb.cl.ind ? 'Potensi temuan situs' : bb.src.nama)}</span><span class="dot ${dot}"></span>
+      <span class="ct ${done ? 'done' : ''}">${done ? '✓' : (s.total - s.none) + '/' + s.total}</span></button>`;
+  }).join('');
+  const s = siteCount(a, b);
+  const rows = b.its.map((it, n) => {
+    const x = b.cl.ind ? r.indikasi.rows[n] : st.rows[n], rr = peekR(a, b.cl.k, it.i);
+    const q9 = !b.cl.ind && /\[9001\]/.test(x.q);
+    const qText = b.cl.ind ? mdInline(x.t) : ea(String(x.q).replace(/\[9001\]\s*/g, ''));
+    const meta = b.cl.ind
+      ? `<div class="smeta"><b>Site:</b> ${esc(x.site || '—')} · <b>Perkiraan kategori:</b> ${esc(x.kat || '—')}</div><div class="smeta"><b>Verifikasi saat audit:</b> ${esc(x.v || '—')}</div>`
+      : `<div class="smeta"><b>Bukti / sampel yang diminta:</b> ${ea(x.b || '—')}</div>`;
+    const btns = KATEGORI.map(k => `<button class="cat ${k.cls} ${rr.cat === k.id ? 'on' : ''}" data-act="cat" data-k="${esc(b.cl.k)}" data-i="${it.i}" data-v="${k.id}">${esc(k.t)}</button>`).join('');
+    return `<div class="item ${rr.cat ? CAT[rr.cat].cls : ''}" id="it-${esc(b.cl.k.replace(/\./g, '_'))}-${it.i}">
+      <div class="q"><span class="qn">${n + 1}</span><div><span class="sref">${esc(x.k)}</span>${q9 ? '<span class="tag q9">ISO 9001</span>' : ''}<div style="margin-top:4px">${qText}</div></div></div>
+      ${meta}
+      <div class="cats">${btns}</div>
+      <textarea class="inp" rows="${Math.min(10, Math.max(2, String(rr.bukti || '').split('\n').length))}" data-item="${esc(b.cl.k)}|${it.i}|bukti" placeholder="Catatan auditor: bukti objektif, dokumen & nomor, personel yang diwawancarai…">${esc(rr.bukti || '')}</textarea>
+    </div>`;
+  }).join('');
+  const prev = blocks[bi - 1], next = blocks[bi + 1];
+  const info = b.cl.ind ? r.indikasi.intro : st.info;
+  return `<div class="ck">
+    <nav class="nav">${nav}</nav>
+    <section><div class="card">
+      <div class="chead"><span class="cno">${esc(b.cl.ind ? 'Ditelusuri dari situs' : st.no + (st.waktu ? ' · ' + st.waktu : ''))}</span>
+        <div class="ctitle"><h2>${esc(b.cl.ind ? 'Potensi temuan dari situs resmi' : st.nama)}</h2>
+          <div class="note">${s.total - s.none}/${s.total} ${b.cl.ind ? 'indikasi diverifikasi' : 'pertanyaan dinilai'} · ${esc(stdLabel(a))}</div></div></div>
+      ${r.petunjuk && bi === 0 ? `<details class="sinfo"><summary>Cara memakai pertanyaan per site</summary>${mdLite(r.petunjuk)}</details>` : ''}
+      ${info ? `<div class="sinfo">${mdLite(info)}</div>` : ''}
+      ${rows}
+      <div class="pager">
+        ${prev ? `<button class="btn" data-act="site" data-k="${esc(prev.cl.k)}">← ${esc(prev.cl.t)}</button>` : '<span></span>'}
+        ${next ? `<button class="btn pri" data-act="site" data-k="${esc(next.cl.k)}">${esc(next.cl.t)} →</button>` : `<button class="btn pri" data-act="go" data-v="temuan">Ke Daftar Temuan →</button>`}
+      </div>
+    </div></section></div>`;
+}
+function siteSummaryCard(a){
+  const rows = siteBlocks(a).map(b => { const s = siteCount(a, b);
+    return `<tr><td><b>${esc(b.cl.t)}</b></td>${['C', 'OBS', 'OFI', 'MIN', 'MAJ', 'NA', 'none'].map(x => `<td class="n">${s[x] || ''}</td>`).join('')}</tr>`; }).join('');
+  return `<div class="card"><h2>Hasil per Site</h2><p class="sub">Penilaian pertanyaan per site (tab Per Site). Temuan dari tab itu ikut masuk Daftar Temuan dan laporan.</p>
+    <div style="overflow-x:auto"><table class="tb"><thead><tr><th>Site</th><th>Sesuai</th><th>Obs</th><th>OFI</th><th>Minor</th><th>Mayor</th><th>N/A</th><th>Belum</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+/** Tabel pertanyaan per site untuk laporan (blank=false) atau checklist cetak (blank=true) */
+function siteTablesHTML(a, blank){
+  const r = RC(a); if (!r) return '';
+  let h = `<p style="${RS.h2}">${blank ? 'Pertanyaan audit per site' : 'Lampiran. Hasil audit per site'}</p>`;
+  siteBlocks(a).forEach(b => {
+    const st = b.src;
+    h += `<table style="${RS.tb}"><thead><tr><th style="${RS.th}" colspan="5">${esc(b.cl.t)}${!b.cl.ind && st.waktu ? ' <span style="font-weight:normal">— ' + esc(st.waktu) + '</span>' : ''}</th></tr>
+      <tr><th style="${RS.th};width:5%">No</th><th style="${RS.th};width:15%">Klausul</th><th style="${RS.th};width:42%">${b.cl.ind ? 'Indikasi di situs' : 'Pertanyaan audit'}</th><th style="${RS.th};width:${blank ? 14 : 9}%">Hasil</th><th style="${RS.th}">Catatan / bukti objektif</th></tr></thead>`;
+    b.its.forEach((it, n) => {
+      const x = b.cl.ind ? r.indikasi.rows[n] : st.rows[n], rr = peekR(a, b.cl.k, it.i);
+      const sub = b.cl.ind ? (x.site ? 'Site: ' + x.site + '. ' : '') + (x.v ? 'Verifikasi: ' + x.v : '') : (x.b ? 'Bukti/sampel: ' + x.b : '');
+      h += `<tr><td style="${RS.tdc}">${n + 1}</td><td style="${RS.td}">${esc(x.k)}</td><td style="${RS.td}">${esc(mdPlain(b.cl.ind ? x.t : x.q))}${sub ? '<br><span style="font-size:8.5pt;color:#555">' + esc(mdPlain(sub)) + '</span>' : ''}</td>
+        <td style="${blank ? RS.td + ';font-size:8.5pt' : RS.tdc}">${blank ? '☐C ☐Obs ☐OFI<br>☐Mi ☐Ma ☐NA' : catCell(rr.cat)}</td><td style="${RS.td}">${blank ? '' : nl2br(rr.bukti)}</td></tr>`;
+    });
+    h += `</table>`;
+  });
+  return h;
+}
+function siteBlankHTML(a){
+  const p = a.profil, r = RC(a);
+  let h = `<p style="${RS.h1}">CHECKLIST AUDIT PER SITE</p><p style="text-align:center;margin:0 0 4pt">${esc(stdLong(a))}</p>
+    <p style="text-align:center;margin:0 0 10pt"><b>${esc(p.nama || '')}</b> — ${esc(p.jenisAudit || '')}</p>
+    <table style="${RS.tb}"><tr><td style="${RS.kv}">Tanggal audit</td><td style="${RS.kv2}">${esc(fmtDate(p.tglMulai))}${p.tglSelesai && p.tglSelesai !== p.tglMulai ? ' s.d. ' + esc(fmtDate(p.tglSelesai)) : ''}</td></tr>
+    <tr><td style="${RS.kv}">Ketua tim auditor</td><td style="${RS.kv2}">${esc(p.lead)}</td></tr><tr><td style="${RS.kv}">Auditor</td><td style="${RS.kv2}">${nl2br(p.auditors)}</td></tr></table>
+    <p style="font-size:9pt">Kategori: C = Sesuai, Obs = Observasi, OFI = Peluang Peningkatan, Mi = KTS Minor, Ma = KTS Mayor, NA = Tidak berlaku. [9001] = persyaratan khusus ISO 9001:2015.</p>`;
+  if (r.petunjuk) h += `<p style="${RS.p};font-size:9.5pt">${nl2br(mdPlain(r.petunjuk))}</p>`;
+  h += siteTablesHTML(a, true);
+  return h + glossaryAppendixHTML(h);
+}
+
 /* ---------------- view: temuan ---------------- */
 function vTemuan(a){
   const fs = findings(a);
@@ -598,8 +726,8 @@ function vTemuan(a){
     const fin = (name, label, type = 'text') => `<div><label class="f">${label}</label><input class="inp" type="${type}" data-item="${k}|${i}|${name}" value="${esc(r[name] || '')}"></div>`;
     return `<div class="fd">
       <div class="fd-h"><span class="id">${f.id}</span><span class="b ${CAT[r.cat].cls}">${esc(CAT[r.cat].t)}</span>
-        <span class="note">Klausul ${esc(cno(a, f.cl))} — ${esc(f.cl.t)}${isQ9(a) && f.cl.cond !== 'q9' ? ' · ISO 9001: ' + esc(q9no(f.cl) || 'tidak ada padanan') : ''}${f.it.q9 ? ' · butir ISO 9001' : ''}</span><span class="spacer"></span>
-        <button class="btn sm" data-act="jump" data-k="${k}" data-i="${i}">Lihat di checklist</button></div>
+        <span class="note">${f.cl.site ? esc(f.cl.t) + (f.it.siteName ? ' (' + esc(f.it.siteName) + ')' : '') + ' — ' + esc(f.it.ref || '') : `Klausul ${esc(cno(a, f.cl))} — ${esc(f.cl.t)}${isQ9(a) && f.cl.cond !== 'q9' ? ' · ISO 9001: ' + esc(q9no(f.cl) || 'tidak ada padanan') : ''}${f.it.q9 ? ' · butir ISO 9001' : ''}`}</span><span class="spacer"></span>
+        <button class="btn sm" data-act="jump" data-k="${esc(k)}" data-i="${i}">${f.cl.site ? "Lihat di Per Site" : "Lihat di checklist"}</button></div>
       <div class="q2">Butir: ${ea(f.it.text)}</div>
       <div class="grid g2">
         ${fld('uraian', 'Pernyataan temuan', 'Uraikan ketidaksesuaian/observasi secara jelas dan spesifik…', 3)}
@@ -664,6 +792,7 @@ function vLaporan(a){
     <div style="overflow-x:auto;margin-top:14px"><table class="tb"><thead><tr><th>Klausul</th><th>Sesuai</th><th>Obs</th><th>OFI</th><th>Minor</th><th>Mayor</th><th>N/A</th><th>Belum</th><th>% Sesuai</th><th>Sebaran</th></tr></thead><tbody>${rows}</tbody></table></div>
     <p class="note" style="margin-top:8px">*% kesesuaian = (Sesuai + Observasi + OFI) ÷ (butir dinilai − N/A). ${t.none ? `<b style="color:var(--maj)">Masih ada ${t.none} butir belum dinilai.</b>` : ''}</p>
   </div>
+  ${RC(a) ? siteSummaryCard(a) : ''}
   ${isQ9(a) ? `<div class="card"><h2>Matriks Hasil per Klausul ISO 9001:2015</h2>
     <p class="sub">Hasil butir checklist dikelompokkan menurut klausul ISO 9001:2015 padanannya. Matriks ini juga dicetak di laporan Word/PDF.</p>
     <div style="overflow-x:auto"><table class="tb"><thead><tr><th>ISO 9001</th><th>Klausul ISO 21001 di checklist</th><th>Sesuai</th><th>Obs</th><th>OFI</th><th>Minor</th><th>Mayor</th><th>Belum</th><th>Temuan</th><th>Status</th></tr></thead><tbody>
@@ -696,6 +825,7 @@ function vLaporan(a){
       <button class="btn pri" data-act="word">⬇ Unduh Laporan Word (.doc)</button>
       <button class="btn pri" data-act="pdf">⎙ Cetak / Simpan PDF</button>
       <button class="btn" data-act="blank">⬇ Checklist Kerja Kosong (Word)</button>
+      ${RC(a) ? '<button class="btn" data-act="blanksite">⬇ Checklist per Site (Word)</button>' : ''}
       <span class="spacer"></span>
       <button class="btn" data-act="export">💾 Simpan File (.json)</button>
       <button class="btn" data-act="import">📂 Buka File (.json)</button>
@@ -815,7 +945,7 @@ function reportHTML(a, opt){
   else {
     h += `<table style="${RS.tb}"><thead><tr><th style="${RS.th};width:10%">No.</th><th style="${RS.th};width:10%">Kategori</th><th style="${RS.th};width:16%">Klausul</th><th style="${RS.th}">Pernyataan temuan</th><th style="${RS.th};width:28%">Bukti objektif</th></tr></thead>`;
     for (const f of fs) {
-      h += `<tr><td nowrap style="${RS.td};white-space:nowrap"><b>${f.id}</b></td><td style="${RS.td}">${catCell(f.r.cat)}</td><td style="${RS.td}">${clauseRefHTML(a, f.cl)}<br><span style="font-size:8.5pt">${esc(f.cl.t)}</span>${f.it.q9 ? '<br><span style="font-size:8pt;color:#555">(butir ISO 9001)</span>' : ''}</td>
+      h += `<tr><td nowrap style="${RS.td};white-space:nowrap"><b>${f.id}</b></td><td style="${RS.td}">${catCell(f.r.cat)}</td><td style="${RS.td}">${clauseRefHTML(a, f.cl, f.it)}<br><span style="font-size:8.5pt">${esc(f.cl.t)}${f.it.siteName ? ' (' + esc(f.it.siteName) + ')' : ''}</span>${f.it.q9 ? '<br><span style="font-size:8pt;color:#555">(butir ISO 9001)</span>' : ''}</td>
         <td style="${RS.td}">${f.r.uraian ? nl2br(f.r.uraian) : '<i>' + esc(f.it.text) + '</i>'}${f.r.cat === 'OBS' || f.r.cat === 'OFI' ? (f.r.tindakan ? '<br><b>Saran:</b> ' + nl2br(f.r.tindakan) : '') : ''}</td>
         <td style="${RS.td}">${nl2br(f.r.bukti) || '—'}</td></tr>`;
     }
@@ -862,6 +992,7 @@ function reportHTML(a, opt){
       }
     }
   }
+  if (RC(a)) h += pageBreak(opt.word) + siteTablesHTML(a, false);
   h += `<p style="${RS.h3}">Keterangan kategori</p><table style="${RS.tb}">
     ${[['Sesuai', 'Persyaratan dipenuhi dan diterapkan secara efektif, didukung bukti objektif.'],
        ['Observasi', 'Belum merupakan ketidaksesuaian, tetapi berpotensi menjadi ketidaksesuaian bila tidak ditangani.'],
@@ -875,7 +1006,8 @@ function reportHTML(a, opt){
 }
 
 /** Nomor klausul untuk laporan: "8.2.1" atau, pada audit terintegrasi, "ISO 21001: 8.2.1 / ISO 9001: 8.2.2, 8.2.3" */
-function clauseRefHTML(a, cl){
+function clauseRefHTML(a, cl, it){
+  if (cl.site) return esc((it && it.ref) || '');
   if (!isQ9(a)) return esc(cno(a, cl));
   if (cl.cond === 'q9') return 'ISO 9001: ' + esc(cl.no[a.versi].replace(' (9001)', ''));
   return 'ISO 21001: ' + esc(cno(a, cl)) + '<br>ISO 9001: ' + esc(q9no(cl) || '—');
@@ -1023,9 +1155,11 @@ document.addEventListener('click', e => {
       if (n) { save(); const y = window.scrollY; render(); window.scrollTo(0, y); toast(n + ' butir ditandai Sesuai'); } else toast('Semua butir sudah dinilai');
       break;
     }
-    case 'jump': CUR_CLAUSE = b.dataset.k; go('checklist'); setTimeout(() => { const el = document.getElementById('it-' + b.dataset.k.replace(/\./g, '_') + '-' + b.dataset.i); if (el) { el.scrollIntoView({ block:'center' }); el.style.boxShadow = '0 0 0 3px #ffd166'; } }, 30); break;
+    case 'jump': if (b.dataset.k.startsWith('S:')) { CUR_SITE = b.dataset.k; go('site'); } else { CUR_CLAUSE = b.dataset.k; go('checklist'); } setTimeout(() => { const el = document.getElementById('it-' + b.dataset.k.replace(/\./g, '_') + '-' + b.dataset.i); if (el) { el.scrollIntoView({ block:'center' }); el.style.boxShadow = '0 0 0 3px #ffd166'; } }, 30); break;
     case 'word': exportWord(a, reportHTML(a, { word:true, checklist:$('#optChecklist').checked, cap:$('#optCAP').checked }), fileBase(a, 'Laporan Audit')); break;
     case 'pdf': printPDF(a, reportHTML(a, { word:false, checklist:$('#optChecklist').checked, cap:$('#optCAP').checked }), fileBase(a, 'Laporan Audit')); break;
+    case 'blanksite': exportWord(a, siteBlankHTML(a), fileBase(a, 'Checklist per Site')); break;
+    case 'site': CUR_SITE = b.dataset.k; render(); window.scrollTo(0, 0); break;
     case 'blank': exportWord(a, blankChecklistHTML(a, $('#optGuide').checked, $('#optCrit').checked), fileBase(a, 'Checklist Audit')); break;
     case 'siteAdd': a.profil.sites.push({ type:'prodi', nama:'', jenjang:'' }); save(); { const y = window.scrollY; render(); window.scrollTo(0, y); } break;
     case 'siteDel': if (a.profil.sites.length > 1) { a.profil.sites.splice(+b.dataset.i, 1); save(); const y = window.scrollY; render(); window.scrollTo(0, y); } break;

@@ -12,3 +12,6 @@ __pycache__/
 
 # Salinan offline (isinya sama dengan index.html)
 Aplikasi Audit ISO 21001.html
+
+# Data audit klien (rahasia, tidak boleh ke GitHub publik)
+data-audit/
