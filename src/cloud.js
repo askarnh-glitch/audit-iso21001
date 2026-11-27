@@ -121,8 +121,9 @@ async function openAudit(id){
     } else if (stale) toast('Versi di Drive lebih baru, tetapi ada perubahan Anda yang belum terkirim');
   }
   if (!DB.audits[id]) return;
-  DB.current = id; CUR_CLAUSE = null; persist();
-  go(DB.audits[id].profil.jenjang ? 'checklist' : 'profil');
+  DB.current = id; CUR_CLAUSE = null; CUR_SITE = null; persist();
+  // audit yang membawa rencana per site langsung dibuka di tab Per Site
+  go(RC(DB.audits[id]) ? 'site' : DB.audits[id].profil.jenjang ? 'checklist' : 'profil');
 }
 
 async function deleteAudit(id){
