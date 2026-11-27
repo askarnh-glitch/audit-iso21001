@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="id">
 <head>
-<meta name="build" content="20261128070917">
+<meta name="build" content="20261128071259">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Audit ISO 21001</title>
@@ -6367,11 +6367,12 @@ function siteCritHTML(k, i, x, cur){
 const SITE_NOTES = [['unit', 'Auditee / personel yang diwawancarai', 'mis. Ketua LPPM (Dr. …); Kepala Pusat Penelitian; 2 staf; 1 dosen penerima hibah', 2],
   ['baik', 'Praktik baik / kekuatan', 'Satu poin per baris', 2],
   ['kendala', 'Kendala atau keterbatasan audit', 'mis. dokumen X belum tersedia; auditee utama berhalangan; waktu kurang', 2],
-  ['simpul', 'Kesimpulan auditor untuk site ini', 'mis. Sistem diterapkan, tetapi pemantauan sasaran belum efektif', 2]];
+  ['simpul', 'Kesimpulan auditor untuk site ini', 'mis. Sistem diterapkan, tetapi pemantauan sasaran belum efektif', 2],
+  ['catatan', 'Catatan auditor lainnya (hal yang belum masuk ke pertanyaan mana pun)', 'mis. indikasi dari situs resmi yang perlu diverifikasi', 3]];
 function siteNotesHTML(a, k){
   const r = a.res[k] || {};
   return `<div class="sinfo" style="margin-top:14px"><b>Catatan site (masuk ke laporan untuk Lead Auditor)</b>
-    <div class="grid g2" style="margin-top:8px">${SITE_NOTES.map(([f, l, ph, n]) => `<div><label class="f">${l}</label><textarea class="inp" rows="${n}" data-snote="${esc(k)}|${f}" placeholder="${esc(ph)}">${esc(r[f] || '')}</textarea></div>`).join('')}</div></div>`;
+    <div class="grid g2" style="margin-top:8px">${SITE_NOTES.map(([f, l, ph, n]) => `<div><label class="f">${l}</label><textarea class="inp" rows="${Math.max(n, Math.min(14, String(r[f] || '').split('\n').length * 2))}" data-snote="${esc(k)}|${f}" placeholder="${esc(ph)}">${esc(r[f] || '')}</textarea></div>`).join('')}</div></div>`;
 }
 /** Teks panduan kategori terpilih untuk satu temuan (dasar penetapan kategori) */
 function findingCrit(a, f){
@@ -6492,6 +6493,7 @@ function leadReportHTML(a, word){
     if (bl.length) h += `<p style="${RS.p}"><b>Praktik baik:</b></p><ul style="margin:0 0 6pt">${bl.map(x => `<li>${esc(x.replace(/^[-•*]\s*/, ''))}</li>`).join('')}</ul>`;
     if (n.kendala) h += `<p style="${RS.p}"><b>Kendala/keterbatasan audit:</b> ${nl2br(n.kendala)}</p>`;
     if (n.simpul) h += `<p style="${RS.p}"><b>Kesimpulan site:</b> ${nl2br(n.simpul)}</p>`;
+    if (n.catatan) h += `<p style="${RS.p}"><b>Catatan auditor:</b> ${nl2br(n.catatan)}</p>`;
   });
   if (kl.items.length) h += `<p style="${RS.h3}">${esc(kl.title)}</p>` + fTable(kl.items);
   // diteruskan ke lead
