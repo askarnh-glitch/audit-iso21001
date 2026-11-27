@@ -5,6 +5,7 @@
 const GLOSSARY = [
  { cat:'Sistem Mutu & Audit', items:[
   ['SMOP','Sistem Manajemen Organisasi Pendidikan','Sistem manajemen menurut ISO 21001 (Educational Organization Management System/EOMS).'],
+  ['SMM','Sistem Manajemen Mutu','Sistem manajemen menurut ISO 9001 (Quality Management System/QMS). Pada audit terintegrasi, SMM dan SMOP diaudit bersama.'],
   ['ISO','International Organization for Standardization','Badan standardisasi internasional penerbit ISO 21001.'],
   ['SNI','Standar Nasional Indonesia','SNI ISO 21001:2025 merupakan adopsi identik ISO 21001:2025.'],
   ['KTS','Ketidaksesuaian','Tidak terpenuhinya suatu persyaratan; dibedakan menjadi KTS Mayor dan KTS Minor.'],
@@ -172,6 +173,9 @@ const GLOSSARY = [
   ['BAP','Berita Acara Perkuliahan',''],
   ['PA','Pembimbing Akademik','Dosen pembimbing akademik (dosen PA).'],
   ['LPM','Lembaga Penjaminan Mutu',''],
+  ['LPPM','Lembaga Penelitian dan Pengabdian kepada Masyarakat',''],
+  ['SPI','Satuan Pengawasan Internal','Unit pengawasan intern pada PTN/PTKN.'],
+  ['UPT','Unit Pelaksana Teknis','Mis. UPT Perpustakaan, UPT Teknologi Informasi dan Data, UPT Bahasa, UPT Ma’had Al-Jami’ah.'],
   ['LPMPP','Lembaga Penjaminan Mutu dan Pengembangan Pembelajaran',''],
   ['GPM','Gugus Penjaminan Mutu','Unit penjaminan mutu tingkat fakultas.'],
   ['UPM','Unit Penjaminan Mutu','Unit penjaminan mutu tingkat program studi.'],

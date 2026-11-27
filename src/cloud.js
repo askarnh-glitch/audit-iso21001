@@ -78,7 +78,7 @@ async function clPush(){
     if (!a) { CL.dirty = CL.dirty.filter(x => x !== id); continue; }
     const sentAt = a.updated;
     try {
-      const j = await clApi('save', { audit:a, baseRev:CL.rev[id] || 0, who:CL.who, jenjang:jenjangText(a), progress:progress(a) });
+      const j = await clApi('save', { audit:a, baseRev:CL.rev[id] || 0, who:CL.who, jenjang:jenjangText(a) + (isQ9(a) ? ' · + ' + Q9_LABEL : ''), progress:progress(a) });
       CL.rev[id] = j.rev; CL.meta[id] = j.meta; CLS.err = '';
       if (!DB.audits[id] || DB.audits[id].updated === sentAt) CL.dirty = CL.dirty.filter(x => x !== id);
       else retry = true;
@@ -150,7 +150,7 @@ async function cloudResolve(mode){
   try {
     if (mode === 'mine') {
       const a = DB.audits[id];
-      const j = await clApi('save', { audit:a, force:true, who:CL.who, jenjang:jenjangText(a), progress:progress(a) });
+      const j = await clApi('save', { audit:a, force:true, who:CL.who, jenjang:jenjangText(a) + (isQ9(a) ? ' · + ' + Q9_LABEL : ''), progress:progress(a) });
       CL.rev[id] = j.rev; CL.meta[id] = j.meta; CL.dirty = CL.dirty.filter(x => x !== id);
     } else {
       if (mode === 'copy') {

@@ -11,6 +11,7 @@
   --kr-bg:#fffdf7; --kr-line:#eadfc4; --warn-ink:#8a5a00;
   --chg-bg:#fff8e6; --chg-line:#f3dca2; --hover-line:#b8c7d9; --danger-line:#f1c4bf;
   --tag25-bg:#e8e1fb; --tag25-ink:#5b3cc4; --tag18-bg:#e0f0f5; --tag18-ink:#11667f;
+  --q9-bg:#fde8f1; --q9-ink:#a1185a; --q9-line:#f3bfd6;
   --toast-bg:#1a2433;
   --radius:10px; --shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.08);
   color-scheme:light;
@@ -30,6 +31,7 @@
   --kr-bg:#1d1a13; --kr-line:#4a3d22; --warn-ink:#e0b24a;
   --chg-bg:#2a2414; --chg-line:#5a4a20; --hover-line:#3d4a5a; --danger-line:#5a2a26;
   --tag25-bg:#2c2450; --tag25-ink:#b9a6ff; --tag18-bg:#12323a; --tag18-ink:#7cc9dd;
+  --q9-bg:#3a1a2b; --q9-ink:#f49ac3; --q9-line:#6a2d4b;
   --toast-bg:#2c3644;
   --shadow:0 1px 2px rgba(0,0,0,.4),0 1px 3px rgba(0,0,0,.3);
   --pri-2:color-mix(in srgb,var(--pri) 55%,#ffffff);
@@ -277,3 +279,12 @@ table.tb td.n{text-align:center;font-variant-numeric:tabular-nums}
 /* penyimpanan online */
 .clbanner{border:1px solid var(--maj);background:var(--maj-bg)}
 .clbanner h3{color:var(--maj);margin-top:0}
+
+/* ---- audit terintegrasi ISO 9001 ---- */
+.tag.q9,.b.q9{background:var(--q9-bg);color:var(--q9-ink)}
+.q9map{margin-top:10px;background:var(--q9-bg);border:1px solid var(--q9-line);border-radius:8px;padding:8px 12px;font-size:13px;line-height:1.55}
+.q9map b{color:var(--q9-ink)}
+.q9map.none{background:var(--soft);border-color:var(--line)}
+.q9map.none b{color:var(--muted)}
+.q9n{display:inline-block;font-weight:700;font-variant-numeric:tabular-nums;color:var(--q9-ink)}
+.item.q9it:not(.c):not(.obs):not(.ofi):not(.min):not(.maj):not(.na){border-left-color:var(--q9-ink)}

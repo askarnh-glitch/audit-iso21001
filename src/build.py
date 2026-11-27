@@ -24,7 +24,7 @@ config_js += 'const GOOGLE_CLIENT_ID = ' + json.dumps(cfg.get('googleClientId', 
 html = read('index.html')
 html = html.replace('/*__CSS__*/', read('style.css'))
 html = html.replace('/*__DATA__*/', read('data.js') + '\n' + read('glossary.js'))
-guide = '\n'.join(read(f) for f in ('guide_a.js', 'guide_b.js', 'guide_c.js', 'guide_d.js', 'crit_a.js', 'crit_b.js', 'crit_c.js', 'crit_d.js'))
+guide = '\n'.join(read(f) for f in ('guide_a.js', 'guide_b.js', 'guide_c.js', 'guide_d.js', 'crit_a.js', 'crit_b.js', 'crit_c.js', 'crit_d.js', 'iso9001.js'))
 html = html.replace('/*__GUIDE__*/', guide)
 html = html.replace('/*__APP__*/', config_js + read('cloud.js') + '\n' + read('app.js'))
 

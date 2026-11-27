@@ -60,6 +60,7 @@ function ensure(a){
   if (!Array.isArray(p.sites) || !p.sites.length) p.sites = [{ type:'institusi', nama:'', jenjang:'' }];
   if (!Array.isArray(p.rumpunList)) p.rumpunList = [];
   if (!Array.isArray(p.lam)) p.lam = [];
+  if (typeof p.iso9001 !== 'boolean') p.iso9001 = false;
   return a;
 }
 const A = () => DB.current ? ensure(DB.audits[DB.current]) : null;
@@ -72,7 +73,7 @@ function newAudit(){
     profil:{ nama:'', alamat:'', kode:'', jenjang:'', madrasah:false, ptBentuk:'', ptPenyelenggara:'', rumpun:'',
              abk:false, paud:false, lingkup:'', jenisAudit:'Audit Internal', noLaporan:'', tglMulai:'', tglSelesai:'', lokasi:'',
              lead:'', auditors:'', pimpinan:'', jabatanPimpinan:'', wakil:'', tujuan:'', kriteria:'',
-             justAbk:'', justPaud:'', sites:[{ type:'institusi', nama:'', jenjang:'' }], rumpunList:[], lam:[] },
+             justAbk:'', justPaud:'', iso9001:false, sites:[{ type:'institusi', nama:'', jenjang:'' }], rumpunList:[], lam:[] },
     res:{},
     kesimpulan:{ kekuatan:'', ringkasan:'', rek:'auto', catatanRek:'', tempat:'', tglLaporan:'' }
   };
@@ -86,8 +87,21 @@ function parseItem(s){
   if (!m) return { v:null, should:false, text:s };
   return { v:m[1] || null, should:!!m[2], text:s.slice(m[0].length) };
 }
-function itemsFor(cl, v){ return cl.items.map((s, i) => ({ ...parseItem(s), i })).filter(it => !it.v || it.v === v); }
+/** Butir aktif satu klausul untuk audit a. Butir tambahan ISO 9001 (mode terintegrasi) berindeks 'q0', 'q1', … */
+function itemsFor(cl, a){
+  let list = cl.items.map((s, i) => ({ ...parseItem(s), i }));
+  if (isQ9(a) && cl.q9items) list = list.concat(cl.q9items.map((s, n) => ({ ...parseItem(s), i:'q' + n, q9:true })));
+  return list.filter(it => !it.v || it.v === a.versi);
+}
+const isQIdx = i => /^q\d+$/.test(String(i));
+/** Indeks butir dari atribut data-*: angka untuk butir ISO 21001, 'qN' untuk butir tambahan ISO 9001 */
+const ixOf = s => isQIdx(s) ? String(s) : +s;
+function itemAt(cl, i){
+  const s = isQIdx(i) ? (cl.q9items || [])[+String(i).slice(1)] : cl.items[+i];
+  return s == null ? null : { ...parseItem(s), i:ixOf(i), q9:isQIdx(i) };
+}
 function condOn(a, cond){
+  if (cond === 'q9') return isQ9(a);
   if (cond === 'abk') return !!a.profil.abk;
   if (cond === 'paud') return a.profil.jenjang === 'tk' || !!a.profil.paud;
   return true;
@@ -101,10 +115,21 @@ function clauseOrder(a){
   return list;
 }
 function activeClauses(a){ return clauseOrder(a).filter(c => condOn(a, c.cond)); }
-function excludedClauses(a){ return clauseOrder(a).filter(c => !condOn(a, c.cond)); }
+function excludedClauses(a){ return clauseOrder(a).filter(c => c.cond !== 'q9' && !condOn(a, c.cond)); }
 function cno(a, cl){ return cl.no[a.versi]; }
 function verLabel(v){ return v === '18' ? 'ISO 21001:2018' : 'ISO 21001:2025'; }
 function verLong(v){ return v === '18' ? 'ISO 21001:2018' : 'ISO 21001:2025 (SNI ISO 21001:2025)'; }
+/* ---- audit terintegrasi ISO 9001:2015 ---- */
+const Q9_LABEL = 'ISO 9001:2015', Q9_LONG = 'ISO 9001:2015 (SNI ISO 9001:2015)';
+function isQ9(a){ return !!(a && a.profil && a.profil.iso9001); }
+/** Label standar audit: "ISO 21001:2018" atau "ISO 9001:2015 & ISO 21001:2018" */
+function stdLabel(a){ return isQ9(a) ? Q9_LABEL + ' & ' + verLabel(a.versi) : verLabel(a.versi); }
+function stdLong(a){ return isQ9(a) ? Q9_LONG + ' dan ' + verLong(a.versi) : verLong(a.versi); }
+/** Nama sistem: SMOP, atau "SMM dan SMOP" pada audit terintegrasi */
+function sysName(a){ return isQ9(a) ? 'SMM dan SMOP' : 'SMOP'; }
+/** Nomor klausul ISO 9001 padanan, mis. "8.2.2, 8.2.3" ('' bila khusus ISO 21001) */
+function q9no(cl){ return (Q9_OF[cl.k] || []).map(q => q.n).join(', '); }
+function q9text(cl){ return (Q9_OF[cl.k] || []).map(q => q.n + ' ' + q.t).join('; '); }
 function getR(a, k, i){ a.res[k] = a.res[k] || { items:{}, unit:'' }; a.res[k].items[i] = a.res[k].items[i] || {}; return a.res[k].items[i]; }
 function peekR(a, k, i){ return (a.res[k] && a.res[k].items[i]) || {}; }
 
@@ -147,9 +172,15 @@ const CRIT_GEN = {
 };
 const CRIT_ORDER = ['C', 'OBS', 'OFI', 'MIN', 'MAJ', 'NA'];
 /** Kriteria per kategori untuk satu butir: {C, OBS, OFI, MIN, MAJ, NA} */
+/** Ambil entri panduan/kriteria butir i (angka = ISO 21001, 'qN' = butir tambahan ISO 9001) */
+function guideEntry(base, extra, cl, i){
+  const q = isQIdx(i), src = q ? (typeof extra !== 'undefined' ? extra : null) : base;
+  const g = src && src[cl.k]; if (!g) return null;
+  let e = g[q ? +String(i).slice(1) : i]; if (typeof e === 'number') e = g[e];
+  return e;
+}
 function critFor(cl, it){
-  const g = (typeof CRIT !== 'undefined') && CRIT[cl.k]; if (!g) return null;
-  let e = g[it.i]; if (typeof e === 'number') e = g[e];
+  const e = guideEntry(typeof CRIT !== 'undefined' ? CRIT : null, typeof CRIT9 !== 'undefined' ? CRIT9 : undefined, cl, it.i);
   if (!Array.isArray(e)) return null;
   const pick = (v, def) => (v && v !== '—') ? v : def;
   return {
@@ -160,8 +191,7 @@ function critFor(cl, it){
   };
 }
 function guideFor(cl, i){
-  const g = (typeof GUIDE !== 'undefined') && GUIDE[cl.k]; if (!g) return null;
-  let e = g[i]; if (typeof e === 'number') e = g[e];
+  const e = guideEntry(typeof GUIDE !== 'undefined' ? GUIDE : null, typeof GUIDE9 !== 'undefined' ? GUIDE9 : undefined, cl, i);
   return Array.isArray(e) ? e : null;
 }
 function filterTagged(list, keys){
@@ -189,7 +219,7 @@ function stats(a){
   const per = {}, tot = { C:0, OBS:0, OFI:0, MIN:0, MAJ:0, NA:0, none:0, total:0 };
   for (const cl of activeClauses(a)) {
     const s = { C:0, OBS:0, OFI:0, MIN:0, MAJ:0, NA:0, none:0, total:0 };
-    for (const it of itemsFor(cl, a.versi)) {
+    for (const it of itemsFor(cl, a)) {
       const c = peekR(a, cl.k, it.i).cat; s.total++; tot.total++;
       if (c && s[c] !== undefined) { s[c]++; tot[c]++; } else { s.none++; tot.none++; }
     }
@@ -203,7 +233,7 @@ function progress(a){ const { tot } = stats(a); return tot.total ? Math.round((t
 function findings(a){
   const out = [];
   activeClauses(a).forEach((cl, ci) => {
-    itemsFor(cl, a.versi).forEach((it, idx) => {
+    itemsFor(cl, a).forEach((it, idx) => {
       const r = peekR(a, cl.k, it.i);
       if (r.cat && SEV[r.cat] !== undefined) out.push({ cl, it, idx, r, ci });
     });
@@ -221,7 +251,7 @@ function autoRek(a){
   const { tot } = stats(a);
   if (tot.MAJ > 0) return 'Belum direkomendasikan — terdapat ' + tot.MAJ + ' KTS Mayor yang harus ditutup dan diverifikasi sebelum rekomendasi dapat diberikan.';
   if (tot.MIN > 0) return 'Direkomendasikan dengan syarat — ' + tot.MIN + ' KTS Minor harus ditindaklanjuti dengan rencana tindakan korektif yang disetujui dalam batas waktu yang disepakati.';
-  return 'Direkomendasikan — SMOP dinilai telah sesuai dengan persyaratan ' + verLabel(a.versi) + ' dan diterapkan secara efektif.';
+  return 'Direkomendasikan — ' + sysName(a) + ' dinilai telah sesuai dengan persyaratan ' + stdLabel(a) + ' dan diterapkan secara efektif.';
 }
 const REK_OPTS = {
   auto:'Otomatis (berdasarkan temuan)',
@@ -233,20 +263,20 @@ const REK_OPTS = {
 function rekText(a){
   const k = a.kesimpulan.rek;
   if (k === 'auto') return autoRek(a);
-  if (k === 'r1') return 'Direkomendasikan — SMOP dinilai telah sesuai dengan persyaratan ' + verLabel(a.versi) + ' dan diterapkan secara efektif.';
+  if (k === 'r1') return 'Direkomendasikan — ' + sysName(a) + ' dinilai telah sesuai dengan persyaratan ' + stdLabel(a) + ' dan diterapkan secara efektif.';
   if (k === 'r2') return 'Direkomendasikan dengan syarat — seluruh KTS harus ditindaklanjuti dengan tindakan korektif yang disetujui dalam batas waktu yang disepakati.';
   if (k === 'r3') return 'Belum direkomendasikan — terdapat ketidaksesuaian yang harus diselesaikan dan diverifikasi terlebih dahulu.';
   return 'Audit internal telah dilaksanakan. Auditee diminta menindaklanjuti seluruh KTS, Observasi, dan Peluang Peningkatan sesuai jadwal yang disepakati.';
 }
-const defTujuan = a => 'Menilai kesesuaian dan efektivitas penerapan Sistem Manajemen Organisasi Pendidikan (SMOP) terhadap persyaratan ' + verLabel(a.versi) + ' serta persyaratan organisasi, dan mengidentifikasi peluang peningkatan.';
-const defKriteria = a => verLong(a.versi) + '; peraturan perundang-undangan yang berlaku bagi satuan/organisasi pendidikan; kebijakan, prosedur, dan dokumen SMOP organisasi.';
+const defTujuan = a => 'Menilai kesesuaian dan efektivitas penerapan ' + (isQ9(a) ? 'Sistem Manajemen Mutu (SMM) dan Sistem Manajemen Organisasi Pendidikan (SMOP) secara terintegrasi' : 'Sistem Manajemen Organisasi Pendidikan (SMOP)') + ' terhadap persyaratan ' + stdLabel(a) + ' serta persyaratan organisasi, dan mengidentifikasi peluang peningkatan.';
+const defKriteria = a => stdLong(a) + '; peraturan perundang-undangan yang berlaku bagi satuan/organisasi pendidikan; kebijakan, prosedur, dan dokumen ' + sysName(a) + ' organisasi.';
 const defJustAbk = 'Organisasi tidak menyelenggarakan layanan khusus bagi peserta didik berkebutuhan khusus pada ruang lingkup audit ini.';
 const defJustPaud = 'Organisasi tidak menyelenggarakan pendidikan anak usia dini (ISCED 0) sehingga Lampiran A tidak berlaku.';
 
 /* ---------------- rendering: shell ---------------- */
 function render(){
   const a = A();
-  $('#cur').innerHTML = a ? esc(a.profil.nama || '(Audit tanpa nama)') + '<span class="pill">' + verLabel(a.versi) + '</span>' : 'Belum ada audit dipilih';
+  $('#cur').innerHTML = a ? esc(a.profil.nama || '(Audit tanpa nama)') + '<span class="pill">' + stdLabel(a) + '</span>' : 'Belum ada audit dipilih';
   document.querySelectorAll('.tab').forEach(t => {
     t.classList.toggle('on', t.dataset.view === VIEW);
     t.disabled = !FREE_VIEWS.includes(t.dataset.view) && !a;
@@ -312,14 +342,14 @@ function go(v){ VIEW = v; render(); window.scrollTo(0, 0); }
 /* ---------------- view: home ---------------- */
 function vHome(){
   if (cloudOn()) setTimeout(() => cloudRefresh(false), 0);
-  const local = Object.values(DB.audits).map(a => ({ id:a.id, nama:a.profil.nama, sub:a.profil.jenisAudit, jenjang:jenjangText(a), versi:a.versi, tglMulai:a.profil.tglMulai, progress:progress(a), updated:a.updated, local:true }));
+  const local = Object.values(DB.audits).map(a => ({ id:a.id, nama:a.profil.nama, sub:a.profil.jenisAudit, jenjang:jenjangText(a), versi:a.versi, q9:isQ9(a), tglMulai:a.profil.tglMulai, progress:progress(a), updated:a.updated, local:true }));
   const list = local.concat(clServerOnlyRows()).sort((x, y) => (y.updated || '').localeCompare(x.updated || ''));
   const rows = list.map(r => {
     const p = r.progress || 0;
     return `<tr>
       <td><b>${esc(r.nama || '(tanpa nama)')}</b><div class="note">${r.local ? esc(r.sub || '') : 'Di Drive' + (r.savedBy ? ' · disimpan ' + esc(r.savedBy) : '')}</div><div style="margin-top:3px">${r.local ? clBadge(r.id) : '<span class="b c">☁ di Drive</span>'}</div></td>
       <td>${esc(r.jenjang || '')}</td>
-      <td><span class="b ${r.versi === '18' ? 'ofi' : 'c'}">${verLabel(r.versi)}</span></td>
+      <td><span class="b ${r.versi === '18' ? 'ofi' : 'c'}">${verLabel(r.versi)}</span>${r.q9 ? '<div style="margin-top:3px"><span class="b q9">+ ' + Q9_LABEL + '</span></div>' : ''}</td>
       <td>${esc(fmtDate(r.tglMulai)) || '<span class="note">—</span>'}</td>
       <td style="min-width:110px"><div class="prog"><i style="width:${p}%"></i></div><div class="note">${p}% dinilai</div></td>
       <td><div class="row">
@@ -330,7 +360,7 @@ function vHome(){
   return `
   <div class="card">
     <div class="row"><div><h2>Aplikasi Audit SMOP — ISO 21001</h2>
-      <p class="sub" style="margin:2px 0 0">Checklist audit untuk TK/PAUD, SD, SMP, SMA, SMK, dan Perguruan Tinggi, dengan pilihan versi ISO 21001:2018 atau ISO 21001:2025.</p></div>
+      <p class="sub" style="margin:2px 0 0">Checklist audit untuk TK/PAUD, SD, SMP, SMA, SMK, dan Perguruan Tinggi, dengan pilihan versi ISO 21001:2018 atau ISO 21001:2025, serta mode audit terintegrasi dengan ISO 9001:2015.</p></div>
       <span class="spacer"></span>
       <button class="btn" data-act="import">Buka File Audit (.json)</button>
       <button class="btn pri" data-act="new">+ Audit Baru</button></div>
@@ -344,7 +374,7 @@ function vHome(){
   </div>
   <div class="card"><h3>Alur penggunaan</h3>
     <ol style="margin:0;padding-left:20px">
-      <li><b>Profil Audit</b> — pilih versi standar, jenjang (dan jenis PT), isi identitas organisasi & tim audit.</li>
+      <li><b>Profil Audit</b> — pilih versi standar (centang ISO 9001:2015 untuk audit terintegrasi), jenjang (dan jenis PT), isi identitas organisasi & tim audit.</li>
       <li><b>Checklist</b> — nilai setiap butir: Sesuai, Observasi, OFI, KTS Minor, KTS Mayor, atau N/A; catat bukti objektif.</li>
       <li><b>Temuan</b> — lengkapi uraian temuan dan rencana tindakan korektif.</li>
       <li><b>Laporan</b> — tulis kesimpulan, lalu ekspor ke <b>Word</b> atau <b>PDF</b>.</li></ol>
@@ -374,7 +404,9 @@ function vProfil(a){
   const jaOpts = JENIS_AUDIT.map(s => `<option ${p.jenisAudit === s ? 'selected' : ''}>${esc(s)}</option>`).join('');
   return `
   <div class="card"><h2>1. Versi Standar</h2><p class="sub">Checklist, penomoran klausul, dan laporan akan menyesuaikan versi yang dipilih.</p>
-    <div class="opts ver">${verCards}</div></div>
+    <div class="opts ver">${verCards}</div>
+    <label class="chk q9chk" style="margin-top:14px"><input type="checkbox" data-bind="profil.iso9001" ${p.iso9001 ? 'checked' : ''}><span><b>Audit terintegrasi dengan ISO 9001:2015 (Sistem Manajemen Mutu)</b>
+      <small>Untuk audit yang kriterianya ISO 9001:2015 dan ISO 21001 sekaligus. Setiap klausul menampilkan padanan klausul ISO 9001, butir tambahan khusus ISO 9001 ikut dinilai, klausul 8.5.5 ISO 9001 (kegiatan pascapenyerahan) ditambahkan, dan laporan memuat matriks hasil per klausul ISO 9001. Istilah <i>pelanggan</i> di ISO 9001 dipadankan dengan peserta didik dan penerima manfaat lain.</small></span></label></div>
 
   <div class="card"><h2>2. Jenjang / Jenis Organisasi Pendidikan</h2><p class="sub">Contoh bukti audit pada checklist disesuaikan dengan jenjang yang dipilih.</p>
     <div class="opts">${jCards}</div>
@@ -449,13 +481,15 @@ function navHTML(a, st){
       <option value="all" ${NAV_FILTER === 'all' ? 'selected' : ''}>Semua klausul</option>
       <option value="todo" ${NAV_FILTER === 'todo' ? 'selected' : ''}>Belum selesai dinilai</option>
       <option value="find" ${NAV_FILTER === 'find' ? 'selected' : ''}>Ada temuan</option>
-      <option value="chg" ${NAV_FILTER === 'chg' ? 'selected' : ''}>Berubah 2018 ↔ 2025</option></select></div>`;
+      <option value="chg" ${NAV_FILTER === 'chg' ? 'selected' : ''}>Berubah 2018 ↔ 2025</option>
+      ${isQ9(a) ? `<option value="q9" ${NAV_FILTER === 'q9' ? 'selected' : ''}>Ada butir tambahan ISO 9001</option>` : ''}</select></div>`;
   for (const g of GROUPS) {
     const cls = activeClauses(a).filter(c => c.g === g.id).filter(c => {
       const s = st.per[c.k];
       if (NAV_FILTER === 'todo') return s.none > 0;
       if (NAV_FILTER === 'find') return s.MAJ + s.MIN + s.OBS + s.OFI > 0;
       if (NAV_FILTER === 'chg') return !/^Substansi sama/.test(c.chg || '');
+      if (NAV_FILTER === 'q9') return !isQ9(a) || c.cond === 'q9' || itemsFor(c, a).some(it => it.q9);
       return true;
     });
     if (!cls.length) continue;
@@ -464,7 +498,7 @@ function navHTML(a, st){
       const s = st.per[c.k];
       const dot = s.MAJ ? 'maj' : s.MIN ? 'min' : s.OBS ? 'obs' : s.OFI ? 'ofi' : '';
       const done = s.none === 0;
-      html += `<button class="${c.k === CUR_CLAUSE ? 'on' : ''}" data-act="clause" data-k="${c.k}" title="${esc(cno(a, c) + ' ' + c.t)}">
+      html += `<button class="${c.k === CUR_CLAUSE ? 'on' : ''}" data-act="clause" data-k="${c.k}" title="${esc(cno(a, c) + ' ' + c.t + (isQ9(a) && c.cond !== 'q9' ? ' — ISO 9001: ' + (q9no(c) || 'tidak ada padanan') : ''))}">
         <span class="no">${esc(cno(a, c))}</span><span class="tt">${esc(c.t)}</span><span class="dot ${dot}"></span>
         <span class="ct ${done ? 'done' : ''}">${done ? '✓' : (s.total - s.none) + '/' + s.total}</span></button>`;
     }
@@ -494,9 +528,10 @@ function critHTML(cl, it, cur){
 }
 function itemHTML(a, cl, it, n){
   const r = peekR(a, cl.k, it.i);
-  const tags = (it.v === '25' ? '<span class="tag v25">Khusus 2025</span>' : it.v === '18' ? '<span class="tag v18">Khusus 2018</span>' : '') + (it.should ? '<span class="tag s">Anjuran</span>' : '');
+  const tags = (it.q9 ? '<span class="tag q9" title="Butir tambahan dari ISO 9001:2015">ISO 9001</span>' : '')
+    + (it.v === '25' ? `<span class="tag v25">${it.q9 ? 'Bila ISO 21001:2025' : 'Khusus 2025'}</span>` : it.v === '18' ? `<span class="tag v18">${it.q9 ? 'Bila ISO 21001:2018' : 'Khusus 2018'}</span>` : '') + (it.should ? '<span class="tag s">Anjuran</span>' : '');
   const btns = KATEGORI.map(k => `<button class="cat ${k.cls} ${r.cat === k.id ? 'on' : ''}" data-act="cat" data-k="${cl.k}" data-i="${it.i}" data-v="${k.id}">${esc(k.t)}</button>`).join('');
-  return `<div class="item ${r.cat ? CAT[r.cat].cls : ''}" id="it-${cl.k.replace(/\./g, '_')}-${it.i}">
+  return `<div class="item ${r.cat ? CAT[r.cat].cls : ''}${it.q9 ? ' q9it' : ''}" id="it-${cl.k.replace(/\./g, '_')}-${it.i}">
     <div class="q"><span class="qn">${n}</span><div>${ea(it.text)}${tags}</div></div>
     ${guideHTML(a, cl, it)}
     <div class="cats">${btns}</div>
@@ -504,13 +539,20 @@ function itemHTML(a, cl, it, n){
     <textarea class="inp" rows="${Math.min(10, Math.max(2, String(r.bukti || '').split('\n').length))}" data-item="${cl.k}|${it.i}|bukti" placeholder="Bukti objektif & catatan auditor (dokumen, rekaman, wawancara, observasi)…">${esc(r.bukti || '')}</textarea>
   </div>`;
 }
+/** Kotak padanan klausul ISO 9001 pada kepala klausul (mode terintegrasi) */
+function q9MapHTML(cl){
+  if (cl.cond === 'q9') return `<div class="q9map"><b>Khusus ISO 9001:2015.</b> Klausul ini tidak ada di ISO 21001. Pada layanan pendidikan, kegiatan pascapenyerahan meliputi layanan kepada lulusan setelah lulus.</div>`;
+  const q = Q9_OF[cl.k];
+  if (!q) return `<div class="q9map none"><b>Khusus ISO 21001.</b> Tidak ada padanan langsung di ISO 9001:2015; hasilnya dilaporkan sebagai bagian SMOP.</div>`;
+  return `<div class="q9map"><b>Padanan ISO 9001:2015:</b> ${q.map(x => `<span class="q9n">${esc(x.n)}</span> ${esc(x.t)}`).join(' · ')}</div>`;
+}
 function vChecklist(a){
   const act = activeClauses(a);
   if (!a.profil.jenjang) return `<div class="card"><h2>Lengkapi profil terlebih dahulu</h2><p class="sub">Pilih jenjang/jenis organisasi pendidikan pada tab Profil Audit agar contoh bukti audit sesuai.</p><button class="btn pri" data-act="go" data-v="profil">Ke Profil Audit</button></div>`;
   if (!CUR_CLAUSE || !act.find(c => c.k === CUR_CLAUSE)) CUR_CLAUSE = act[0].k;
   const st = stats(a);
   const idx = act.findIndex(c => c.k === CUR_CLAUSE), cl = act[idx];
-  const its = itemsFor(cl, a.versi);
+  const its = itemsFor(cl, a);
   const evs = evOf(cl);
   const ev = evKeys(a, cl).filter(k => evs[k]).map(k => `<li><span class="lb">${EV_LABEL[k]}:</span> ${ea(evs[k])}</li>`).join('');
   const s = st.per[cl.k];
@@ -521,9 +563,9 @@ function vChecklist(a){
     <nav class="nav">${navHTML(a, st)}</nav>
     <section>
       <div class="card">
-        <div class="chead"><span class="cno">${esc(verLabel(a.versi))} · ${esc(cno(a, cl))}</span>
+        <div class="chead"><span class="cno">${cl.cond === 'q9' ? esc(Q9_LABEL) + ' · ' + esc(cl.no[a.versi].replace(' (9001)', '')) : esc(verLabel(a.versi)) + ' · ' + esc(cno(a, cl))}</span>
           <div class="ctitle"><h2>${esc(cl.t)}</h2>
-            <div class="note">${s.total - s.none}/${s.total} butir dinilai${cl.no[otherV] !== cl.no[a.versi] ? ' · di ' + verLabel(otherV) + ': klausul ' + esc(cl.no[otherV]) : ''}${cl.cond === 'abk' ? ' · klausul kebutuhan khusus' : ''}</div></div>
+            <div class="note">${s.total - s.none}/${s.total} butir dinilai${cl.no[otherV] !== cl.no[a.versi] ? ' · di ' + verLabel(otherV) + ': klausul ' + esc(cl.no[otherV]) : ''}${cl.cond === 'abk' ? ' · klausul kebutuhan khusus' : ''}${its.some(it => it.q9) ? ' · ' + its.filter(it => it.q9).length + ' butir tambahan ISO 9001' : ''}</div></div>
           <div class="row" style="gap:6px"><span class="note">Tampilkan:</span>
           <button class="btn sm tgl ${UI.gdDoc ? 'on' : ''}" data-act="gdTgl" data-v="gdDoc" title="Buka/tutup semua kotak dokumen">📄 Dokumen</button>
           <button class="btn sm tgl ${UI.gdTek ? 'on' : ''}" data-act="gdTgl" data-v="gdTek" title="Buka/tutup semua kotak pertanyaan teknis">🛠 Teknis</button>
@@ -531,6 +573,7 @@ function vChecklist(a){
           <button class="btn sm" data-act="critAll">${UI.critOpen ? 'Tutup' : 'Buka'} panduan penilaian</button>
           <button class="btn sm" data-act="allc" data-k="${cl.k}" title="Isi semua butir yang belum dinilai dengan Sesuai">Belum dinilai → Sesuai</button></div></div>
         ${cl.chg && !/^Substansi sama/.test(cl.chg) ? `<div class="chg"><b>Perbedaan 2018 ↔ 2025:</b> ${ea(cl.chg)}</div>` : ''}
+        ${isQ9(a) ? q9MapHTML(cl) : ''}
         ${ev ? `<div class="evid"><h4>Contoh bukti objektif — ${esc(jenjangText(a))}${siteText(a) ? ' · ' + esc(siteText(a)) : ''}</h4><ul>${ev}</ul>${a.profil.madrasah && cl.g !== 'A' ? '<div class="note" style="margin-top:4px">Madrasah: sesuaikan Dapodik → EMIS, e-Rapor → RDM, Dinas → Kemenag.</div>' : ''}</div>` : ''}
         <div style="margin-top:12px"><label class="f">Unit / auditee / personel yang diwawancarai pada klausul ini</label>
           <input class="inp" data-unit="${cl.k}" value="${esc(unit)}" placeholder="mis. Wakasek Kurikulum; Kaprodi; Bagian Akademik"></div>
@@ -555,7 +598,7 @@ function vTemuan(a){
     const fin = (name, label, type = 'text') => `<div><label class="f">${label}</label><input class="inp" type="${type}" data-item="${k}|${i}|${name}" value="${esc(r[name] || '')}"></div>`;
     return `<div class="fd">
       <div class="fd-h"><span class="id">${f.id}</span><span class="b ${CAT[r.cat].cls}">${esc(CAT[r.cat].t)}</span>
-        <span class="note">Klausul ${esc(cno(a, f.cl))} — ${esc(f.cl.t)}</span><span class="spacer"></span>
+        <span class="note">Klausul ${esc(cno(a, f.cl))} — ${esc(f.cl.t)}${isQ9(a) && f.cl.cond !== 'q9' ? ' · ISO 9001: ' + esc(q9no(f.cl) || 'tidak ada padanan') : ''}${f.it.q9 ? ' · butir ISO 9001' : ''}</span><span class="spacer"></span>
         <button class="btn sm" data-act="jump" data-k="${k}" data-i="${i}">Lihat di checklist</button></div>
       <div class="q2">Butir: ${ea(f.it.text)}</div>
       <div class="grid g2">
@@ -582,6 +625,24 @@ function statBoxes(t){
 }
 
 /* ---------------- view: laporan ---------------- */
+/** Matriks hasil per klausul ISO 9001:2015 (gabungan hasil klausul checklist padanannya) */
+function q9Matrix(a){
+  const fs = findings(a), act = new Set(activeClauses(a).map(c => c.k));
+  return ISO9001.map(q => {
+    const ks = q.k.filter(k => act.has(k));
+    const inRow = (k, i) => !q.it || !q.it[k] || q.it[k].some(x => String(x) === String(i));
+    const s = { C:0, OBS:0, OFI:0, MIN:0, MAJ:0, NA:0, none:0, total:0 };
+    ks.forEach(k => itemsFor(CLAUSES.find(c => c.k === k), a).filter(it => inRow(k, it.i)).forEach(it => {
+      const c = peekR(a, k, it.i).cat; s.total++;
+      if (c && s[c] !== undefined) s[c]++; else s.none++;
+    }));
+    const ids = fs.filter(f => ks.includes(f.cl.k) && inRow(f.cl.k, f.it.i)).map(f => f.id);
+    const cls = ks.map(k => CLAUSES.find(c => c.k === k)).map(c => c.cond === 'q9' ? '—' : cno(a, c));
+    const status = !s.total ? 'Tidak dinilai' : s.MAJ ? 'KTS Mayor' : s.MIN ? 'KTS Minor' : s.none ? 'Belum lengkap' : s.OBS || s.OFI ? 'Sesuai, ada catatan' : s.NA === s.total ? 'N/A' : 'Sesuai';
+    return { q, ks, s, ids, cls, status };
+  });
+}
+const Q9_STATUS_CLS = { 'KTS Mayor':'maj', 'KTS Minor':'min', 'Belum lengkap':'na', 'Sesuai, ada catatan':'obs', 'Sesuai':'c', 'N/A':'na', 'Tidak dinilai':'na' };
 function vLaporan(a){
   const st = stats(a), t = st.tot, k = a.kesimpulan;
   const p = pct(t);
@@ -597,12 +658,17 @@ function vLaporan(a){
   }).join('');
   const rekOpts = Object.entries(REK_OPTS).map(([v, l]) => `<option value="${v}" ${k.rek === v ? 'selected' : ''}>${esc(l)}</option>`).join('');
   return `
-  <div class="card"><div class="row"><div><h2>Ringkasan Hasil Audit</h2><p class="sub" style="margin:2px 0 0">${esc(a.profil.nama || '(tanpa nama)')} · ${esc(jenjangText(a))} · ${verLabel(a.versi)}</p></div>
+  <div class="card"><div class="row"><div><h2>Ringkasan Hasil Audit</h2><p class="sub" style="margin:2px 0 0">${esc(a.profil.nama || '(tanpa nama)')} · ${esc(jenjangText(a))} · ${esc(stdLabel(a))}</p></div>
     <span class="spacer"></span><div style="text-align:right"><div style="font-size:28px;font-weight:800;color:var(--pri-ink)">${p === null ? '—' : p + '%'}</div><div class="note">tingkat kesesuaian*</div></div></div>
     <div class="stats" style="margin-top:12px">${statBoxes(t)}</div>
     <div style="overflow-x:auto;margin-top:14px"><table class="tb"><thead><tr><th>Klausul</th><th>Sesuai</th><th>Obs</th><th>OFI</th><th>Minor</th><th>Mayor</th><th>N/A</th><th>Belum</th><th>% Sesuai</th><th>Sebaran</th></tr></thead><tbody>${rows}</tbody></table></div>
     <p class="note" style="margin-top:8px">*% kesesuaian = (Sesuai + Observasi + OFI) ÷ (butir dinilai − N/A). ${t.none ? `<b style="color:var(--maj)">Masih ada ${t.none} butir belum dinilai.</b>` : ''}</p>
   </div>
+  ${isQ9(a) ? `<div class="card"><h2>Matriks Hasil per Klausul ISO 9001:2015</h2>
+    <p class="sub">Hasil butir checklist dikelompokkan menurut klausul ISO 9001:2015 padanannya. Matriks ini juga dicetak di laporan Word/PDF.</p>
+    <div style="overflow-x:auto"><table class="tb"><thead><tr><th>ISO 9001</th><th>Klausul ISO 21001 di checklist</th><th>Sesuai</th><th>Obs</th><th>OFI</th><th>Minor</th><th>Mayor</th><th>Belum</th><th>Temuan</th><th>Status</th></tr></thead><tbody>
+    ${q9Matrix(a).map(m => `<tr><td><b>${esc(m.q.n)}</b> ${esc(m.q.t)}</td><td>${esc(m.cls.join(', ') || '—')}</td>${['C', 'OBS', 'OFI', 'MIN', 'MAJ', 'none'].map(x => `<td class="n">${m.s[x] || ''}</td>`).join('')}<td>${esc(m.ids.join(', '))}</td><td style="white-space:nowrap"><span class="b ${Q9_STATUS_CLS[m.status]}">${esc(m.status)}</span></td></tr>`).join('')}
+    </tbody></table></div></div>` : ''}
 
   <div class="card"><h2>Kesimpulan Audit</h2>
     <div class="grid">
@@ -647,7 +713,17 @@ function vBeda(){
   }).join('');
   return `<div class="card"><h2>Perbedaan ISO 21001:2018 dan ISO 21001:2025</h2>
     <p class="sub">Ringkasan perubahan yang tercermin pada butir checklist. Berguna untuk audit transisi. ISO 21001:2025 (diadopsi identik sebagai SNI ISO 21001:2025) merevisi edisi 2018 dan menggabungkan Amandemen 1:2024 tentang aksi perubahan iklim; perubahan utama lainnya adalah revisi narasi asesmen agar mencerminkan praktik terbaik asesmen pendidikan.</p>
-    <div style="overflow-x:auto"><table class="tb"><thead><tr><th>2018</th><th>2025</th><th>Klausul & perubahan</th><th>Butir baru 2025</th><th>Butir khusus 2018</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+    <div style="overflow-x:auto"><table class="tb"><thead><tr><th>2018</th><th>2025</th><th>Klausul & perubahan</th><th>Butir baru 2025</th><th>Butir khusus 2018</th></tr></thead><tbody>${rows}</tbody></table></div></div>
+  <div class="card"><h2>Pemetaan ISO 9001:2015 ↔ ISO 21001</h2>
+    <p class="sub">Dipakai pada audit terintegrasi (centang <b>ISO 9001:2015</b> di Profil Audit). ISO 21001 disusun di atas kerangka ISO 9001, sehingga sebagian besar persyaratan ISO 9001 sudah tercakup oleh butir ISO 21001. Persyaratan ISO 9001 yang belum tercakup ditambahkan sebagai <b>butir tambahan ISO 9001</b>. Istilah <i>pelanggan</i> di ISO 9001 dipadankan dengan peserta didik dan penerima manfaat lain; <i>produk dan jasa</i> dipadankan dengan produk dan layanan pendidikan.</p>
+    <div style="overflow-x:auto"><table class="tb"><thead><tr><th>ISO 9001:2015</th><th>Klausul ISO 21001 (2018 / 2025)</th><th>Butir tambahan ISO 9001</th></tr></thead><tbody>
+    ${ISO9001.map(q => {
+      const cls = q.k.map(k => CLAUSES.find(c => c.k === k));
+      const nAdd = cls.reduce((n, c) => n + (c.cond === 'q9' ? c.items.length : (c.q9items || []).length), 0);
+      return `<tr><td><b>${esc(q.n)}</b> ${esc(q.t)}</td><td>${cls.map(c => c.cond === 'q9' ? '<i>tidak ada — klausul khusus ISO 9001</i>' : esc(c.no['18'] === c.no['25'] ? c.no['18'] : c.no['18'] + ' / ' + c.no['25']) + ' ' + esc(c.t)).join('<br>')}</td><td class="n">${nAdd || ''}</td></tr>`;
+    }).join('')}
+    </tbody></table></div>
+    <p class="note" style="margin-top:8px">Klausul khusus ISO 21001 tanpa padanan langsung di ISO 9001: ${esc(CLAUSES.filter(c => c.cond !== 'q9' && !Q9_OF[c.k]).map(c => c.no['25']).join(', '))}.</p></div>`;
 }
 
 /* =====================================================================
@@ -675,9 +751,9 @@ function reportHTML(a, opt){
   const kv = (l, v) => `<tr><td style="${RS.kv}">${l}</td><td style="${RS.kv2}">${v || '—'}</td></tr>`;
   const tgl = p.tglMulai ? fmtDate(p.tglMulai) + (p.tglSelesai && p.tglSelesai !== p.tglMulai ? ' s.d. ' + fmtDate(p.tglSelesai) : '') : '';
   let h = '';
-  h += `<p style="${RS.h1}">LAPORAN AUDIT</p>
-    <p style="text-align:center;font-size:12pt;font-weight:bold;margin:0">SISTEM MANAJEMEN ORGANISASI PENDIDIKAN (SMOP)</p>
-    <p style="text-align:center;font-size:11pt;margin:2pt 0 2pt">${esc(verLong(a.versi))}</p>
+  h += `<p style="${RS.h1}">${isQ9(a) ? 'LAPORAN AUDIT TERINTEGRASI' : 'LAPORAN AUDIT'}</p>
+    <p style="text-align:center;font-size:12pt;font-weight:bold;margin:0">${isQ9(a) ? 'SISTEM MANAJEMEN MUTU (SMM) DAN<br>' : ''}SISTEM MANAJEMEN ORGANISASI PENDIDIKAN (SMOP)</p>
+    <p style="text-align:center;font-size:11pt;margin:2pt 0 2pt">${esc(stdLong(a))}</p>
     <p style="text-align:center;font-size:12pt;font-weight:bold;margin:6pt 0 12pt">${esc(p.nama || '(Nama organisasi)')}</p>`;
 
   h += `<p style="${RS.h2}">1. Informasi Audit</p><table style="${RS.tb}">
@@ -689,7 +765,7 @@ function reportHTML(a, opt){
     ${p.jenjang === 'pt' ? kv('Lembaga akreditasi', esc((p.lam || []).join(', ')) + (p.rumpun ? (p.lam && p.lam.length ? '<br>' : '') + esc(p.rumpun) : '')) : ''}
     ${kv(p.jenjang === 'pt' ? 'Kode PT' : 'NPSN / NSM', esc(p.kode))}
     ${kv('Alamat', esc(p.alamat))}
-    ${kv('Standar acuan', esc(verLong(a.versi)))}
+    ${kv('Standar acuan', esc(stdLong(a)))}
     ${kv('Jenis audit', esc(p.jenisAudit))}
     ${kv('Tanggal audit', esc(tgl))}
     ${kv('Lokasi / metode', esc(p.lokasi))}
@@ -726,6 +802,12 @@ function reportHTML(a, opt){
     h += `<tr><td style="${RS.td}">${g.id === 'A' ? 'Lampiran A' : g.id + '. ' + esc(g.t)}</td>${['C', 'OBS', 'OFI', 'MIN', 'MAJ', 'NA'].map(x => `<td style="${RS.tdc}">${s[x] || ''}</td>`).join('')}<td style="${RS.tdc}">${q === null ? '—' : q + '%'}</td></tr>`;
   }
   h += `</table><p style="font-size:8.5pt;color:#555;margin:0 0 6pt">% kesesuaian = (Sesuai + Observasi + OFI) ÷ (butir dinilai − N/A).</p>`;
+  if (isQ9(a)) {
+    h += `<p style="${RS.h3}">Matriks hasil per klausul ISO 9001:2015</p><table style="${RS.tb}"><thead><tr><th style="${RS.th};width:34%">Klausul ISO 9001:2015</th><th style="${RS.th};width:17%">Klausul ISO 21001 (checklist)</th>${['C', 'Obs', 'OFI', 'Mi', 'Ma'].map(x => `<th style="${RS.th};text-align:center">${x}</th>`).join('')}<th style="${RS.th};width:14%">Temuan</th><th style="${RS.th};width:12%">Status</th></tr></thead>`;
+    for (const m of q9Matrix(a)) h += `<tr><td style="${RS.td}"><b>${esc(m.q.n)}</b> ${esc(m.q.t)}</td><td style="${RS.td}">${esc(m.cls.join(', ') || '—')}</td>${['C', 'OBS', 'OFI', 'MIN', 'MAJ'].map(x => `<td style="${RS.tdc}">${m.s[x] || ''}</td>`).join('')}<td style="${RS.td}">${esc(m.ids.join(', '))}</td><td style="${RS.td}">${esc(m.status)}</td></tr>`;
+    const only = activeClauses(a).filter(c => !Q9_OF[c.k]);
+    h += `</table><p style="font-size:8.5pt;color:#555;margin:0 0 6pt">Klausul checklist tanpa padanan ISO 9001 (khusus ISO 21001): ${esc(only.map(c => cno(a, c)).join(', ') || '—')}. Hasilnya tercakup pada ringkasan per klausul di atas.</p>`;
+  }
 
   // temuan
   h += `<p style="${RS.h2}">4. Daftar Temuan</p>`;
@@ -733,7 +815,7 @@ function reportHTML(a, opt){
   else {
     h += `<table style="${RS.tb}"><thead><tr><th style="${RS.th};width:10%">No.</th><th style="${RS.th};width:10%">Kategori</th><th style="${RS.th};width:16%">Klausul</th><th style="${RS.th}">Pernyataan temuan</th><th style="${RS.th};width:28%">Bukti objektif</th></tr></thead>`;
     for (const f of fs) {
-      h += `<tr><td nowrap style="${RS.td};white-space:nowrap"><b>${f.id}</b></td><td style="${RS.td}">${catCell(f.r.cat)}</td><td style="${RS.td}">${esc(cno(a, f.cl))}<br><span style="font-size:8.5pt">${esc(f.cl.t)}</span></td>
+      h += `<tr><td nowrap style="${RS.td};white-space:nowrap"><b>${f.id}</b></td><td style="${RS.td}">${catCell(f.r.cat)}</td><td style="${RS.td}">${clauseRefHTML(a, f.cl)}<br><span style="font-size:8.5pt">${esc(f.cl.t)}</span>${f.it.q9 ? '<br><span style="font-size:8pt;color:#555">(butir ISO 9001)</span>' : ''}</td>
         <td style="${RS.td}">${f.r.uraian ? nl2br(f.r.uraian) : '<i>' + esc(f.it.text) + '</i>'}${f.r.cat === 'OBS' || f.r.cat === 'OFI' ? (f.r.tindakan ? '<br><b>Saran:</b> ' + nl2br(f.r.tindakan) : '') : ''}</td>
         <td style="${RS.td}">${nl2br(f.r.bukti) || '—'}</td></tr>`;
     }
@@ -764,17 +846,17 @@ function reportHTML(a, opt){
 
   // lampiran checklist
   if (opt.checklist) {
-    h += pageBreak(opt.word) + `<p style="${RS.h2}">Lampiran 1. Checklist Audit ${esc(verLabel(a.versi))}</p>`;
+    h += pageBreak(opt.word) + `<p style="${RS.h2}">Lampiran 1. Checklist Audit ${esc(stdLabel(a))}</p>`;
     for (const g of GROUPS) {
       const cls = activeClauses(a).filter(c => c.g === g.id); if (!cls.length) continue;
       h += `<p style="${RS.h3}">${g.id === 'A' ? '' : 'Klausul ' + g.id + ' — '}${esc(g.t)}</p>`;
       for (const cl of cls) {
         const unit = a.res[cl.k] && a.res[cl.k].unit;
-        h += `<table style="${RS.tb}"><thead><tr><th style="${RS.th}" colspan="4">${esc(cno(a, cl))} ${esc(cl.t)}${unit ? ' <span style="font-weight:normal">— Auditee: ' + esc(unit) + '</span>' : ''}</th></tr>
+        h += `<table style="${RS.tb}"><thead><tr><th style="${RS.th}" colspan="4">${esc(cno(a, cl))} ${esc(cl.t)}${q9HeadNote(a, cl)}${unit ? ' <span style="font-weight:normal">— Auditee: ' + esc(unit) + '</span>' : ''}</th></tr>
           <tr><th style="${RS.th};width:5%">No</th><th style="${RS.th};width:47%">Butir audit</th><th style="${RS.th};width:10%">Hasil</th><th style="${RS.th}">Bukti objektif / catatan</th></tr></thead>`;
-        itemsFor(cl, a.versi).forEach((it, n) => {
+        itemsFor(cl, a).forEach((it, n) => {
           const r = peekR(a, cl.k, it.i);
-          h += `<tr><td style="${RS.tdc}">${n + 1}</td><td style="${RS.td}">${esc(it.text)}${it.should ? ' <i>(anjuran)</i>' : ''}</td><td style="${RS.tdc}">${catCell(r.cat)}</td><td style="${RS.td}">${nl2br(r.bukti)}</td></tr>`;
+          h += `<tr><td style="${RS.tdc}">${n + 1}</td><td style="${RS.td}">${esc(it.text)}${it.should ? ' <i>(anjuran)</i>' : ''}${it.q9 ? ' <b style="color:#5b3cc4">[ISO 9001]</b>' : ''}</td><td style="${RS.tdc}">${catCell(r.cat)}</td><td style="${RS.td}">${nl2br(r.bukti)}</td></tr>`;
         });
         h += `</table>`;
       }
@@ -788,10 +870,20 @@ function reportHTML(a, opt){
        ['KTS Mayor', 'Tidak adanya atau gagalnya penerapan suatu persyaratan secara sistemik, atau ketidaksesuaian yang memengaruhi kemampuan SMOP mencapai hasil yang diharapkan.'],
        ['N/A', 'Persyaratan tidak berlaku pada ruang lingkup organisasi (dengan justifikasi).']]
       .map(([x, y]) => `<tr><td style="${RS.kv};width:18%">${x}</td><td style="${RS.kv2}">${y}</td></tr>`).join('')}</table>
-    <p style="font-size:8.5pt;color:#555">Butir checklist merupakan parafrase persyaratan ${esc(verLabel(a.versi))}; bunyi persyaratan resmi merujuk pada dokumen standar.</p>`;
+    <p style="font-size:8.5pt;color:#555">Butir checklist merupakan parafrase persyaratan ${esc(stdLabel(a))}; bunyi persyaratan resmi merujuk pada dokumen standar.</p>`;
   return h + glossaryAppendixHTML(h);
 }
 
+/** Nomor klausul untuk laporan: "8.2.1" atau, pada audit terintegrasi, "ISO 21001: 8.2.1 / ISO 9001: 8.2.2, 8.2.3" */
+function clauseRefHTML(a, cl){
+  if (!isQ9(a)) return esc(cno(a, cl));
+  if (cl.cond === 'q9') return 'ISO 9001: ' + esc(cl.no[a.versi].replace(' (9001)', ''));
+  return 'ISO 21001: ' + esc(cno(a, cl)) + '<br>ISO 9001: ' + esc(q9no(cl) || '—');
+}
+function q9HeadNote(a, cl){
+  if (!isQ9(a) || cl.cond === 'q9') return '';
+  return ' <span style="font-weight:normal;font-size:8.5pt">[ISO 9001: ' + (cl.cond === 'q9' ? 'khusus ISO 9001' : esc(q9no(cl) || 'tidak ada padanan')) + ']</span>';
+}
 function guideCellsHTML(a, cl, it){
   const g = guideFor(cl, it.i); if (!g) return [];
   const docs = filterTagged(g[0], evKeys(a, cl)).map(d => esc(d.t));
@@ -809,7 +901,7 @@ function critCellHTML(cl, it){
     `<tr><td style="border:0;padding:1pt 4pt 1pt 0;vertical-align:top;width:13%;font-size:8.5pt;color:${CAT_COLOR[k]}"><b>${esc(CAT[k].s)}</b></td><td style="border:0;padding:1pt 0;vertical-align:top;font-size:8.5pt">${esc(c[k])}</td></tr>`).join('')}</table>`;
 }
 function blankChecklistHTML(a, withGuide, withCrit){
-  let h = `<p style="${RS.h1}">CHECKLIST AUDIT SMOP</p><p style="text-align:center;margin:0 0 4pt">${esc(verLong(a.versi))}</p>
+  let h = `<p style="${RS.h1}">CHECKLIST AUDIT ${esc(sysName(a))}</p><p style="text-align:center;margin:0 0 4pt">${esc(stdLong(a))}</p>
     <p style="text-align:center;margin:0 0 10pt"><b>${esc(a.profil.nama || '……………………………')}</b> — ${esc(jenjangText(a))}${siteText(a) ? '<br>Site: ' + esc(siteText(a)) : ''}</p>
     <table style="${RS.tb}"><tr><td style="${RS.kv}">Tanggal audit</td><td style="${RS.kv2}">${esc(fmtDate(a.profil.tglMulai)) || ''}</td></tr><tr><td style="${RS.kv}">Auditor</td><td style="${RS.kv2}">${esc(a.profil.lead)}</td></tr></table>
     <p style="font-size:9pt">Kategori: C = Sesuai, Obs = Observasi, OFI = Peluang Peningkatan, Mi = KTS Minor, Ma = KTS Mayor, NA = Tidak berlaku.</p>`;
@@ -819,12 +911,12 @@ function blankChecklistHTML(a, withGuide, withCrit){
     for (const cl of cls) {
       const evs = evOf(cl);
       const ev = evKeys(a, cl).filter(x => evs[x]).map(x => EV_LABEL[x] + ': ' + esc(evs[x])).join('<br>');
-      h += `<table style="${RS.tb}"><thead><tr><th style="${RS.th}" colspan="4">${esc(cno(a, cl))} ${esc(cl.t)}</th></tr></thead>
+      h += `<table style="${RS.tb}"><thead><tr><th style="${RS.th}" colspan="4">${esc(cno(a, cl))} ${esc(cl.t)}${q9HeadNote(a, cl)}</th></tr></thead>
         ${ev ? `<tr><td style="${RS.td};background:#f7f7f7;font-size:8.5pt" colspan="4"><b>Contoh bukti:</b><br>${ev}</td></tr>` : ''}
         <tr><td style="${RS.td}" colspan="4">Auditee/unit: </td></tr>
         <tr><th style="${RS.th};width:5%">No</th><th style="${RS.th};width:45%">Butir audit</th><th style="${RS.th};width:17%">Hasil</th><th style="${RS.th}">Bukti objektif / catatan</th></tr>`;
-      itemsFor(cl, a.versi).forEach((it, n) => {
-        h += `<tr><td style="${RS.tdc}">${n + 1}</td><td style="${RS.td}">${esc(it.text)}${it.should ? ' <i>(anjuran)</i>' : ''}</td><td style="${RS.td};font-size:8.5pt">☐C ☐Obs ☐OFI<br>☐Mi ☐Ma ☐NA</td><td style="${RS.td}"></td></tr>`;
+      itemsFor(cl, a).forEach((it, n) => {
+        h += `<tr><td style="${RS.tdc}">${n + 1}</td><td style="${RS.td}">${esc(it.text)}${it.should ? ' <i>(anjuran)</i>' : ''}${it.q9 ? ' <b style="color:#5b3cc4">[ISO 9001]</b>' : ''}</td><td style="${RS.td};font-size:8.5pt">☐C ☐Obs ☐OFI<br>☐Mi ☐Ma ☐NA</td><td style="${RS.td}"></td></tr>`;
         if (withGuide) guideCellsHTML(a, cl, it).forEach(([bg, gc]) => { h += `<tr><td style="${RS.td}"></td><td style="${RS.td};font-size:8.5pt;background:${bg}" colspan="3">${gc}</td></tr>`; });
         if (withCrit) { const cc = critCellHTML(cl, it); if (cc) h += `<tr><td style="${RS.td}"></td><td style="${RS.td};font-size:8.5pt;background:#fffdf5" colspan="3">${cc}</td></tr>`; }
       });
@@ -834,7 +926,7 @@ function blankChecklistHTML(a, withGuide, withCrit){
   return h + glossaryAppendixHTML(h);
 }
 
-function fileBase(a, pre){ return (pre + ' ' + (a.profil.nama || 'Audit') + ' ' + verLabel(a.versi)).replace(/[\\/:*?"<>|]+/g, '').replace(/\s+/g, ' ').trim(); }
+function fileBase(a, pre){ return (pre + ' ' + (a.profil.nama || 'Audit') + ' ' + stdLabel(a)).replace(/[\\/:*?"<>|]+/g, '').replace(/\s+/g, ' ').trim(); }
 function download(name, blob){
   const u = URL.createObjectURL(blob), l = document.createElement('a');
   l.href = u; l.download = name; document.body.appendChild(l); l.click();
@@ -919,15 +1011,15 @@ document.addEventListener('click', e => {
     case 'bentuk': a.profil.ptBentuk = b.dataset.v; save(); render(); break;
     case 'clause': CUR_CLAUSE = b.dataset.k; render(); window.scrollTo(0, 0); break;
     case 'cat': {
-      const clx = CLAUSES.find(c => c.k === b.dataset.k), itx = clx && parseItem(clx.items[+b.dataset.i] || '');
+      const clx = CLAUSES.find(c => c.k === b.dataset.k), itx = clx && itemAt(clx, b.dataset.i);
       if (itx && itx.should && (b.dataset.v === 'MIN' || b.dataset.v === 'MAJ')) { toast('Butir anjuran ("should") tidak dapat dinilai KTS — gunakan Observasi atau OFI'); break; }
-      const r = getR(a, b.dataset.k, +b.dataset.i);
+      const r = getR(a, b.dataset.k, ixOf(b.dataset.i));
       r.cat = r.cat === b.dataset.v ? '' : b.dataset.v; save();
       const y = window.scrollY; render(); window.scrollTo(0, y); break;
     }
     case 'allc': {
       const cl = CLAUSES.find(c => c.k === b.dataset.k); let n = 0;
-      itemsFor(cl, a.versi).forEach(it => { const r = getR(a, cl.k, it.i); if (!r.cat) { r.cat = 'C'; n++; } });
+      itemsFor(cl, a).forEach(it => { const r = getR(a, cl.k, it.i); if (!r.cat) { r.cat = 'C'; n++; } });
       if (n) { save(); const y = window.scrollY; render(); window.scrollTo(0, y); toast(n + ' butir ditandai Sesuai'); } else toast('Semua butir sudah dinilai');
       break;
     }
@@ -945,7 +1037,7 @@ document.addEventListener('click', e => {
     case 'gdTgl': UI[b.dataset.v] = !UI[b.dataset.v]; saveUI(); { const y = window.scrollY; render(); window.scrollTo(0, y); } break;
     case 'critAll': UI.critOpen = !UI.critOpen; saveUI(); { const y = window.scrollY; render(); window.scrollTo(0, y); } break;
     case 'addnote': {
-      const [k, i] = b.dataset.ref.split('|'), r = getR(a, k, +i);
+      const [k, i] = b.dataset.ref.split('|'), r = getR(a, k, ixOf(i));
       const line = b.dataset.kind === 'doc' ? '✓ Diperiksa: ' + b.dataset.v : 'T: ' + b.dataset.v + '\nJ: ';
       r.bukti = (r.bukti ? r.bukti.replace(/\s+$/, '') + '\n' : '') + line; save();
       const tx = document.querySelector(`[data-item="${k}|${i}|bukti"]`);
@@ -973,9 +1065,9 @@ function onField(e){
       if (el.dataset.bind === 'kesimpulan.rek') { const pv = $('#rekPrev'); if (pv) pv.textContent = rekText(a); }
       else { const y = window.scrollY; render(); window.scrollTo(0, y); }
     }
-    if (el.dataset.bind === 'profil.nama') $('#cur').innerHTML = esc(a.profil.nama || '(Audit tanpa nama)') + '<span class="pill">' + verLabel(a.versi) + '</span>';
+    if (el.dataset.bind === 'profil.nama') $('#cur').innerHTML = esc(a.profil.nama || '(Audit tanpa nama)') + '<span class="pill">' + stdLabel(a) + '</span>';
   } else if (el.dataset.item) {
-    const [k, i, f] = el.dataset.item.split('|'); getR(a, k, +i)[f] = el.value; save();
+    const [k, i, f] = el.dataset.item.split('|'); getR(a, k, ixOf(i))[f] = el.value; save();
   } else if (el.dataset.site) {
     const [i, f] = el.dataset.site.split('|'); a.profil.sites[+i][f] = el.value; save();
     if (f === 'type') { if (el.value !== 'prodi') a.profil.sites[+i].jenjang = ''; const y = window.scrollY; render(); window.scrollTo(0, y); }
