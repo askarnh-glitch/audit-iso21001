@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="id">
 <head>
-<meta name="build" content="20261128071259">
+<meta name="build" content="20261128072942">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Audit ISO 21001</title>
@@ -6226,6 +6226,8 @@ function critHTML(cl, it, cur){
   }).join('');
   return `<details class="kr" ${UI.critOpen ? 'open' : ''}><summary>Panduan penilaian — kapan memilih kategori${cur ? ` · terpilih: <b>${esc(CAT[cur].t)}</b>` : ''}</summary><div class="kr-b">${rows}</div></details>`;
 }
+/** Tinggi kotak catatan per pertanyaan: minimal 4 baris, bertambah 2 baris per baris teks (maks. 20) */
+const noteRows = t => Math.min(20, Math.max(4, String(t || '').split('\n').length * 2));
 function itemHTML(a, cl, it, n){
   const r = peekR(a, cl.k, it.i);
   const tags = (it.q9 ? '<span class="tag q9" title="Butir tambahan dari ISO 9001:2015">ISO 9001</span>' : '')
@@ -6236,7 +6238,7 @@ function itemHTML(a, cl, it, n){
     ${guideHTML(a, cl, it)}
     <div class="cats">${btns}</div>
     ${critHTML(cl, it, r.cat)}
-    <textarea class="inp" rows="${Math.min(10, Math.max(2, String(r.bukti || '').split('\n').length))}" data-item="${cl.k}|${it.i}|bukti" placeholder="Bukti objektif & catatan auditor (dokumen, rekaman, wawancara, observasi)…">${esc(r.bukti || '')}</textarea>
+    <textarea class="inp" rows="${noteRows(r.bukti)}" data-item="${cl.k}|${it.i}|bukti" placeholder="Bukti objektif & catatan auditor (dokumen, rekaman, wawancara, observasi)…">${esc(r.bukti || '')}</textarea>
   </div>`;
 }
 /** Kotak padanan klausul ISO 9001 pada kepala klausul (mode terintegrasi) */
@@ -6317,7 +6319,7 @@ function vSite(a){
       ${siteGuideHTML(b.cl.k, it.i, x)}
       <div class="cats">${btns}</div>
       ${siteCritHTML(b.cl.k, it.i, x, rr.cat)}
-      <textarea class="inp" rows="${Math.min(10, Math.max(2, String(rr.bukti || '').split('\n').length))}" data-item="${esc(b.cl.k)}|${it.i}|bukti" placeholder="Catatan auditor: bukti objektif, dokumen & nomor, personel yang diwawancarai…">${esc(rr.bukti || '')}</textarea>
+      <textarea class="inp" rows="${noteRows(rr.bukti)}" data-item="${esc(b.cl.k)}|${it.i}|bukti" placeholder="Catatan auditor: bukti objektif, dokumen & nomor, personel yang diwawancarai…">${esc(rr.bukti || '')}</textarea>
     </div>`;
   }).join('');
   const hasGuide = (b.cl.ind ? r.indikasi.rows : st.rows).some(x => (x.tek && x.tek.length) || (x.ops && x.ops.length) || x.kr);
@@ -7033,7 +7035,7 @@ document.addEventListener('click', e => {
       const line = b.dataset.kind === 'doc' ? '✓ Diperiksa: ' + b.dataset.v : 'T: ' + b.dataset.v + '\nJ: ';
       r.bukti = (r.bukti ? r.bukti.replace(/\s+$/, '') + '\n' : '') + line; save();
       const tx = document.querySelector(`[data-item="${k}|${i}|bukti"]`);
-      if (tx) { tx.value = r.bukti; tx.rows = Math.min(10, Math.max(2, r.bukti.split('\n').length)); if (b.dataset.kind !== 'doc') { tx.focus(); tx.setSelectionRange(tx.value.length, tx.value.length); } }
+      if (tx) { tx.value = r.bukti; tx.rows = noteRows(r.bukti); if (b.dataset.kind !== 'doc') { tx.focus(); tx.setSelectionRange(tx.value.length, tx.value.length); } }
       toast(b.dataset.kind === 'doc' ? 'Dokumen dicatat sebagai diperiksa' : 'Pertanyaan disalin ke catatan');
       break;
     }
