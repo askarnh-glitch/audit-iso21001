@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="id">
 <head>
-<meta name="build" content="20261128064847">
+<meta name="build" content="20261128070044">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Audit ISO 21001</title>
@@ -5717,6 +5717,8 @@ function ensure(a){
   if (!Array.isArray(p.rumpunList)) p.rumpunList = [];
   if (!Array.isArray(p.lam)) p.lam = [];
   if (typeof p.iso9001 !== 'boolean') p.iso9001 = false;
+  const k = a.kesimpulan || (a.kesimpulan = {});
+  ['pelapor', 'catatanLead', 'deviasi'].forEach(f => { if (typeof k[f] !== 'string') k[f] = ''; });
   return a;
 }
 const A = () => DB.current ? ensure(DB.audits[DB.current]) : null;
@@ -6336,6 +6338,7 @@ function vSite(a){
       ${r.petunjuk && bi === 0 ? `<details class="sinfo"><summary>Cara memakai pertanyaan per site</summary>${mdLite(r.petunjuk)}</details>` : ''}
       ${info ? `<div class="sinfo">${mdLite(info)}</div>` : ''}
       ${rows}
+      ${b.cl.ind ? '' : siteNotesHTML(a, b.cl.k)}
       <div class="pager">
         ${prev ? `<button class="btn" data-act="site" data-k="${esc(prev.cl.k)}">← ${esc(prev.cl.t)}</button>` : '<span></span>'}
         ${next ? `<button class="btn pri" data-act="site" data-k="${esc(next.cl.k)}">${esc(next.cl.t)} →</button>` : `<button class="btn pri" data-act="go" data-v="temuan">Ke Daftar Temuan →</button>`}
@@ -6361,6 +6364,165 @@ function siteCritHTML(k, i, x, cur){
   const rows = CRIT_ORDER.filter(t => c[t]).map(t => `<div class="kr-row ${CAT[t].cls} ${cur === t ? 'on' : ''}" data-act="cat" data-k="${esc(k)}" data-i="${i}" data-v="${t}" title="Klik untuk memilih ${esc(CAT[t].t)}">
       <span class="b ${CAT[t].cls}">${esc(CAT[t].s)}</span><span>${ea(c[t])}</span></div>`).join('');
   return `<details class="kr" ${UI.critOpen ? 'open' : ''}><summary>Panduan penilaian — kapan memilih kategori${cur ? ` · terpilih: <b>${esc(CAT[cur].t)}</b>` : ''}</summary><div class="kr-b">${rows}</div></details>`;
+}
+/* ---------------- laporan anggota tim untuk Lead Auditor ---------------- */
+const SITE_NOTES = [['unit', 'Auditee / personel yang diwawancarai', 'mis. Ketua LPPM (Dr. …); Kepala Pusat Penelitian; 2 staf; 1 dosen penerima hibah', 2],
+  ['baik', 'Praktik baik / kekuatan', 'Satu poin per baris', 2],
+  ['kendala', 'Kendala atau keterbatasan audit', 'mis. dokumen X belum tersedia; auditee utama berhalangan; waktu kurang', 2],
+  ['simpul', 'Kesimpulan auditor untuk site ini', 'mis. Sistem diterapkan, tetapi pemantauan sasaran belum efektif', 2]];
+function siteNotesHTML(a, k){
+  const r = a.res[k] || {};
+  return `<div class="sinfo" style="margin-top:14px"><b>Catatan site (masuk ke laporan untuk Lead Auditor)</b>
+    <div class="grid g2" style="margin-top:8px">${SITE_NOTES.map(([f, l, ph, n]) => `<div><label class="f">${l}</label><textarea class="inp" rows="${n}" data-snote="${esc(k)}|${f}" placeholder="${esc(ph)}">${esc(r[f] || '')}</textarea></div>`).join('')}</div></div>`;
+}
+/** Teks panduan kategori terpilih untuk satu temuan (dasar penetapan kategori) */
+function findingCrit(a, f){
+  if (f.cl.site) {
+    const r = RC(a); if (!r) return '';
+    const x = f.cl.ind ? r.indikasi.rows[f.it.i] : r.sites[f.cl.si].rows[f.it.i];
+    return x && x.kr ? (siteKr(x)[f.r.cat] || '') : '';
+  }
+  const c = critFor(f.cl, f.it); return c ? (c[f.r.cat] || '') : '';
+}
+/** Contoh arah perbaikan (dari panduan OFI) sebagai petunjuk isian */
+function findingHint(a, f){
+  if (f.cl.site) {
+    const r = RC(a); if (!r) return '';
+    const x = f.cl.ind ? r.indikasi.rows[f.it.i] : r.sites[f.cl.si].rows[f.it.i];
+    return x && x.kr && x.kr.OFI ? 'Contoh arah perbaikan: ' + x.kr.OFI : '';
+  }
+  const c = critFor(f.cl, f.it); return c && c.OFI ? 'Contoh arah perbaikan: ' + c.OFI : '';
+}
+const isKTSf = f => f.r.cat === 'MAJ' || f.r.cat === 'MIN';
+const masukanOf = f => isKTSf(f) ? (f.r.masukan || '') : (f.r.tindakan || '');
+function leadDefaultPelapor(a){
+  const lines = (a.profil.auditors || '').split('\n').map(x => x.trim()).filter(Boolean);
+  return lines.find(l => /\(B\)/.test(l)) || lines[lines.length - 1] || '';
+}
+function leadFileBase(a){ return ('Laporan Auditor ' + (a.kesimpulan.pelapor || leadDefaultPelapor(a) || '') + ' untuk Lead - ' + (a.profil.nama || 'Audit')).replace(/[\\/:*?"<>|]+/g, '').replace(/\s+/g, ' ').trim(); }
+function leadCardHTML(a){
+  const k = a.kesimpulan, fs = findings(a);
+  const blank = fs.filter(f => !masukanOf(f)).length, unconf = fs.filter(f => !f.r.konfirmasi).length;
+  return `<div class="card"><h2>Laporan Anggota Tim untuk Lead Auditor</h2>
+    <p class="sub">Laporan ringkas dari auditor anggota tim: site yang diaudit, kriteria, temuan beserta dasar kategori dan masukan perbaikan, praktik baik, cakupan klausul, dan hal yang perlu diteruskan ke Lead.</p>
+    <div class="grid g2">
+      <div><label class="f">Nama auditor pelapor</label>${inp('kesimpulan.pelapor', k.pelapor, leadDefaultPelapor(a) || 'Nama Anda')}</div>
+      <div><label class="f">Penyimpangan dari rencana audit (jadwal, site, auditee)</label>${ta('kesimpulan.deviasi', k.deviasi, 'mis. Audit Fakultas Syariah dimulai 09.00 karena Dekan rapat; tidak ada perubahan lain', 2)}</div>
+      <div style="grid-column:1/-1"><label class="f">Catatan untuk Lead Auditor (hal lintas site, pola sistemik, usulan untuk rapat penutupan)</label>${ta('kesimpulan.catatanLead', k.catatanLead, 'mis. Pola sasaran unit tanpa data capaian muncul di 4 site — usul dijadikan satu temuan sistemik 6.2', 3)}</div>
+    </div>
+    ${fs.length && (blank || unconf) ? `<p class="note" style="margin-top:8px">Belum lengkap: ${blank ? blank + ' temuan tanpa masukan perbaikan' : ''}${blank && unconf ? ' · ' : ''}${unconf ? unconf + ' temuan belum dicatat konfirmasinya' : ''} (isi di tab Temuan).</p>` : ''}
+    <div class="row" style="margin-top:12px">
+      <button class="btn pri" data-act="leadword">⬇ Laporan untuk Lead (Word)</button>
+      <button class="btn" data-act="leadpdf">⎙ Cetak / PDF</button></div></div>`;
+}
+/** Kelompokkan temuan per site (site rencana, temuan situs per site, Lead/lainnya, checklist klausul) */
+function leadGroups(a){
+  const r = RC(a), fs = findings(a), groups = [];
+  const sites = r ? r.sites : [];
+  sites.forEach((st, si) => groups.push({ key:'S:' + st.id, title:st.no + ' — ' + st.nama, waktu:st.waktu, site:st, items:[] }));
+  const lead = { key:'lead', title:'Untuk diteruskan ke Lead Auditor / auditor lain', items:[] };
+  const kl = { key:'klausul', title:'Temuan dari checklist per klausul', items:[] };
+  for (const f of fs) {
+    if (f.cl.site && !f.cl.ind) { groups[f.cl.si].items.push(f); continue; }
+    if (f.cl.ind) {
+      const m = String(f.it.siteName || '').match(/^(\d+)/), g = m && groups[+m[1] - 1];
+      (g || lead).items.push(f); continue;
+    }
+    kl.items.push(f);
+  }
+  return { groups, lead, kl };
+}
+/** Cakupan klausul ISO 9001:2015 dari pertanyaan per site yang sudah dinilai */
+function leadCoverage(a){
+  const r = RC(a); if (!r) return [];
+  const hits = {};
+  r.sites.forEach(st => st.rows.forEach((x, i) => {
+    const c = peekR(a, 'S:' + st.id, i).cat; if (!c) return;
+    const m = String(x.k || '').match(/9001\s+([0-9.,\s]+)/); if (!m) return;
+    m[1].split(',').map(t => t.trim()).filter(Boolean).forEach(ref => { (hits[ref] = hits[ref] || new Set()).add(st.no.replace(/^Site\s*/i, 'S')); });
+  }));
+  return ISO9001.map(q => {
+    const s = new Set();
+    Object.keys(hits).forEach(ref => { if (ref === q.n || ref.startsWith(q.n + '.') || q.n.startsWith(ref + '.')) hits[ref].forEach(x => s.add(x)); });
+    return { q, sites:[...s].sort() };
+  });
+}
+function leadReportHTML(a, word){
+  const p = a.profil, k = a.kesimpulan, fs = findings(a), r = RC(a);
+  const pel = k.pelapor || leadDefaultPelapor(a);
+  const kv = (l, v) => `<tr><td style="${RS.kv}">${l}</td><td style="${RS.kv2}">${v || '—'}</td></tr>`;
+  const tgl = p.tglMulai ? fmtDate(p.tglMulai) + (p.tglSelesai && p.tglSelesai !== p.tglMulai ? ' s.d. ' + fmtDate(p.tglSelesai) : '') : '';
+  const cnt = { MAJ:0, MIN:0, OBS:0, OFI:0 }; fs.forEach(f => { if (cnt[f.r.cat] !== undefined) cnt[f.r.cat]++; });
+  const { groups, lead, kl } = leadGroups(a);
+  let h = `<p style="${RS.h1}">LAPORAN HASIL AUDIT ANGGOTA TIM</p>
+    <p style="text-align:center;font-size:11pt;margin:0">disampaikan kepada Ketua Tim Auditor (Lead Auditor)</p>
+    <p style="text-align:center;font-size:11pt;margin:2pt 0 10pt">${esc(stdLong(a))}</p>`;
+  h += `<p style="${RS.h2}">1. Informasi Audit</p><table style="${RS.tb}">
+    ${kv('Organisasi', esc(p.nama))}${kv('Jenis audit', esc(p.jenisAudit))}${kv('Tanggal audit', esc(tgl))}
+    ${kv('Kriteria audit', nl2br(p.kriteria || defKriteria(a)))}${kv('Ruang lingkup', nl2br(p.lingkup))}
+    ${kv('Ketua tim auditor', esc(p.lead))}${kv('Auditor pelapor', esc(pel))}
+    ${kv('Site yang diaudit pelapor', r ? r.sites.map(st => esc(st.no + ' — ' + st.nama + (st.waktu ? ' (' + st.waktu + ')' : ''))).join('<br>') : esc(siteText(a)))}</table>`;
+  // ringkasan
+  const sb = siteBlocks(a).filter(b => !b.cl.ind);
+  let T = 0, D = 0; sb.forEach(b => b.its.forEach(it => { T++; if (peekR(a, b.cl.k, it.i).cat) D++; }));
+  h += `<p style="${RS.h2}">2. Ringkasan</p>
+    <table style="${RS.tb}"><tr>${['KTS Mayor', 'KTS Minor', 'Observasi', 'OFI', 'Pertanyaan dinilai'].map(x => `<th style="${RS.th};text-align:center">${x}</th>`).join('')}</tr>
+    <tr>${['MAJ', 'MIN', 'OBS', 'OFI'].map(x => `<td style="${RS.tdc}"><b>${cnt[x]}</b></td>`).join('')}<td style="${RS.tdc}">${T ? D + ' dari ' + T + ' (' + Math.round(D / T * 100) + '%)' : '—'}</td></tr></table>`;
+  if (sb.length) {
+    h += `<table style="${RS.tb}"><thead><tr><th style="${RS.th}">Site</th><th style="${RS.th}">Auditee / personel diwawancarai</th>${['Dinilai', 'C', 'Obs', 'OFI', 'Mi', 'Ma', 'NA'].map(x => `<th style="${RS.th};text-align:center">${x}</th>`).join('')}</tr></thead>`;
+    sb.forEach(b => { const s = siteCount(a, b), n = a.res[b.cl.k] || {};
+      h += `<tr><td style="${RS.td}">${esc(b.cl.t)}</td><td style="${RS.td}">${nl2br(n.unit) || '—'}</td><td style="${RS.tdc}">${s.total - s.none}/${s.total}</td>${['C', 'OBS', 'OFI', 'MIN', 'MAJ', 'NA'].map(x => `<td style="${RS.tdc}">${s[x] || ''}</td>`).join('')}</tr>`; });
+    h += `</table>`;
+  }
+  // temuan per site
+  const fRow = f => {
+    const crit = findingCrit(a, f), mas = masukanOf(f);
+    return `<tr><td nowrap style="${RS.td};white-space:nowrap"><b>${f.id}</b><br>${catCell(f.r.cat)}</td>
+      <td style="${RS.td}">${clauseRefHTML(a, f.cl, f.it)}</td>
+      <td style="${RS.td}"><span style="font-size:8.5pt;color:#555">${f.cl.ind ? 'Indikasi di situs' : 'Persyaratan yang diperiksa'}: ${esc(mdPlain(f.it.text))}</span><br>${f.r.uraian ? nl2br(f.r.uraian) : '<i>Pernyataan temuan belum diisi.</i>'}${crit ? `<br><span style="font-size:8.5pt;color:#555"><b>Dasar kategori:</b> ${esc(crit)}</span>` : ''}${f.r.konfirmasi ? `<br><span style="font-size:8.5pt;color:#555"><b>Dikonfirmasi kepada:</b> ${esc(f.r.konfirmasi)}</span>` : ''}</td>
+      <td style="${RS.td}">${nl2br(f.r.bukti) || '—'}</td>
+      <td style="${RS.td}">${mas ? nl2br(mas) : '<i>—</i>'}</td></tr>`;
+  };
+  const fTable = items => `<table style="${RS.tb}"><thead><tr><th style="${RS.th};width:10%">No.</th><th style="${RS.th};width:13%">Klausul</th><th style="${RS.th};width:33%">Temuan</th><th style="${RS.th};width:22%">Bukti objektif</th><th style="${RS.th}">Masukan perbaikan</th></tr></thead>${items.map(fRow).join('')}</table>`;
+  h += `<p style="${RS.h2}">3. Temuan dan Masukan Perbaikan per Site</p>`;
+  if (!fs.length) h += `<p style="${RS.p}">Tidak ada temuan (KTS, Observasi, atau OFI) pada site yang diaudit.</p>`;
+  groups.forEach(g => {
+    const n = a.res[g.key] || {};
+    h += `<p style="${RS.h3}">${esc(g.title)}${g.waktu ? ' <span style="font-weight:normal">— ' + esc(g.waktu) + '</span>' : ''}</p>`;
+    h += g.items.length ? fTable(g.items) : `<p style="${RS.p}">Tidak ada temuan.</p>`;
+    const bl = String(n.baik || '').split('\n').map(x => x.trim()).filter(Boolean);
+    if (bl.length) h += `<p style="${RS.p}"><b>Praktik baik:</b></p><ul style="margin:0 0 6pt">${bl.map(x => `<li>${esc(x.replace(/^[-•*]\s*/, ''))}</li>`).join('')}</ul>`;
+    if (n.kendala) h += `<p style="${RS.p}"><b>Kendala/keterbatasan audit:</b> ${nl2br(n.kendala)}</p>`;
+    if (n.simpul) h += `<p style="${RS.p}"><b>Kesimpulan site:</b> ${nl2br(n.simpul)}</p>`;
+  });
+  if (kl.items.length) h += `<p style="${RS.h3}">${esc(kl.title)}</p>` + fTable(kl.items);
+  // diteruskan ke lead
+  const leadInd = r && r.indikasi ? r.indikasi.rows.map((x, i) => ({ x, i, c:peekR(a, 'S:ind', i) })).filter(o => !/^\d/.test(String(o.x.site || ''))) : [];
+  h += `<p style="${RS.h2}">4. Hal yang Perlu Diteruskan ke Lead Auditor</p>`;
+  if (k.catatanLead) h += `<p style="${RS.p}">${nl2br(k.catatanLead)}</p>`;
+  if (lead.items.length) h += fTable(lead.items);
+  if (leadInd.length) {
+    h += `<p style="${RS.p}">Indikasi dari penelusuran situs resmi yang berada di luar site pelapor (perlu diverifikasi auditor terkait):</p><table style="${RS.tb}"><thead><tr><th style="${RS.th};width:5%">No</th><th style="${RS.th}">Indikasi</th><th style="${RS.th};width:17%">Klausul</th><th style="${RS.th};width:20%">Verifikasi yang disarankan</th><th style="${RS.th};width:10%">Status</th></tr></thead>`;
+    leadInd.forEach((o, n) => { h += `<tr><td style="${RS.tdc}">${n + 1}</td><td style="${RS.td}">${esc(mdPlain(o.x.t))}</td><td style="${RS.td}">${esc(o.x.k)}</td><td style="${RS.td}">${esc(o.x.v)}</td><td style="${RS.tdc}">${o.c.cat ? catCell(o.c.cat) : 'Belum diverifikasi'}</td></tr>`; });
+    h += `</table>`;
+  }
+  if (!k.catatanLead && !lead.items.length && !leadInd.length) h += `<p style="${RS.p}">—</p>`;
+  // cakupan klausul
+  const cov = leadCoverage(a);
+  if (cov.length && isQ9(a)) {
+    const miss = cov.filter(c => !c.sites.length).map(c => c.q.n);
+    h += `<p style="${RS.h2}">5. Cakupan Klausul ISO 9001:2015 yang Diperiksa Pelapor</p>
+      <p style="${RS.p}">Dihitung dari pertanyaan per site yang sudah dinilai. Klausul yang tidak diperiksa pelapor perlu dipastikan tercakup oleh auditor lain: ${miss.length ? esc(miss.join(', ')) : 'semua klausul tercakup'}.</p>
+      <table style="${RS.tb}"><thead><tr><th style="${RS.th};width:45%">Klausul ISO 9001:2015</th><th style="${RS.th}">Site pelapor yang memeriksa</th></tr></thead>
+      ${cov.map(c => `<tr><td style="${RS.td}"><b>${esc(c.q.n)}</b> ${esc(c.q.t)}</td><td style="${RS.td}">${c.sites.length ? esc(c.sites.join(', ')) : '<i>tidak diperiksa</i>'}</td></tr>`).join('')}</table>`;
+  }
+  // penyimpangan & catatan
+  h += `<p style="${RS.h2}">${cov.length && isQ9(a) ? 6 : 5}. Penyimpangan dari Rencana Audit</p><p style="${RS.p}">${k.deviasi ? nl2br(k.deviasi) : 'Tidak ada penyimpangan dari rencana audit.'}</p>
+    <p style="font-size:8.5pt;color:#555;margin:6pt 0">Catatan: KTS Mayor umumnya harus dikoreksi dan diverifikasi sebelum rekomendasi sertifikasi diberikan; KTS Minor memerlukan rencana tindakan korektif yang diterima dalam batas waktu yang ditetapkan lembaga sertifikasi. Observasi dan OFI tidak wajib ditindaklanjuti tetapi dianjurkan. Kategori akhir ditetapkan Lead Auditor.</p>`;
+  const tglLap = k.tglLaporan ? fmtDate(k.tglLaporan) : (p.tglSelesai ? fmtDate(p.tglSelesai) : '');
+  h += `<table style="width:100%;border-collapse:collapse;margin-top:14pt"><tr><td style="width:50%"></td>
+    <td style="width:50%;text-align:center;vertical-align:top;padding:4pt">${esc(k.tempat || '…………')}, ${esc(tglLap || '…………………')}<br>Auditor pelapor<br><br><br><br><b><u>${esc(pel || '……………………………')}</u></b></td></tr></table>`;
+  return h + glossaryAppendixHTML(h);
 }
 function siteSummaryCard(a){
   const rows = siteBlocks(a).map(b => { const s = siteCount(a, b);
@@ -6425,13 +6587,15 @@ function vTemuan(a){
         ${fld('bukti', 'Bukti objektif', '', 3)}
       </div>
       ${isKTS ? `<div class="grid g2" style="margin-top:10px">
+        ${fld('masukan', 'Masukan perbaikan dari auditor (untuk laporan ke Lead)', findingHint(a, f) || 'Arah perbaikan yang disarankan auditor…')}
+        ${fin('konfirmasi', 'Dikonfirmasi kepada auditee (nama/jabatan)')}
         ${fld('akar', 'Analisis akar masalah (diisi auditee)')}
         ${fld('koreksi', 'Koreksi (perbaikan segera)')}
         ${fld('tindakan', 'Tindakan korektif')}
         <div class="grid g3" style="gap:10px">${fin('pic', 'Penanggung jawab')}${fin('target', 'Target selesai', 'date')}
           <div><label class="f">Status</label><select class="inp" data-item="${k}|${i}|status">
             ${['Terbuka', 'Dalam proses', 'Selesai — menunggu verifikasi', 'Ditutup (terverifikasi)'].map(s => `<option ${r.status === s ? 'selected' : ''}>${s}</option>`).join('')}</select></div></div>
-      </div>` : `<div style="margin-top:10px">${fld('tindakan', 'Saran / rencana tindak lanjut', '', 2)}</div>`}
+      </div>` : `<div class="grid g2" style="margin-top:10px">${fld('tindakan', 'Saran / masukan perbaikan', findingHint(a, f), 2)}${fin('konfirmasi', 'Dikonfirmasi kepada auditee (nama/jabatan)')}</div>`}
     </div>`;
   }).join('');
   return `<div class="card"><h2>Daftar Temuan</h2><p class="sub">Temuan tersusun otomatis dari checklist, diurutkan dari KTS Mayor, KTS Minor, Observasi, lalu OFI.</p>
@@ -6505,6 +6669,7 @@ function vLaporan(a){
       </div>
     </div></div>
 
+  ${leadCardHTML(a)}
   <div class="card"><h2>Ekspor</h2>
     <div class="grid g2">
       <label class="chk"><input type="checkbox" id="optChecklist" checked><span><b>Lampirkan checklist lengkap</b><small>Seluruh butir beserta hasil penilaian dan bukti objektif.</small></span></label>
@@ -6849,6 +7014,8 @@ document.addEventListener('click', e => {
     case 'jump': if (b.dataset.k.startsWith('S:')) { CUR_SITE = b.dataset.k; go('site'); } else { CUR_CLAUSE = b.dataset.k; go('checklist'); } setTimeout(() => { const el = document.getElementById('it-' + b.dataset.k.replace(/\./g, '_') + '-' + b.dataset.i); if (el) { el.scrollIntoView({ block:'center' }); el.style.boxShadow = '0 0 0 3px #ffd166'; } }, 30); break;
     case 'word': exportWord(a, reportHTML(a, { word:true, checklist:$('#optChecklist').checked, cap:$('#optCAP').checked }), fileBase(a, 'Laporan Audit')); break;
     case 'pdf': printPDF(a, reportHTML(a, { word:false, checklist:$('#optChecklist').checked, cap:$('#optCAP').checked }), fileBase(a, 'Laporan Audit')); break;
+    case 'leadword': exportWord(a, leadReportHTML(a, true), leadFileBase(a)); break;
+    case 'leadpdf': printPDF(a, leadReportHTML(a, false), leadFileBase(a)); break;
     case 'blanksite': exportWord(a, siteBlankHTML(a), fileBase(a, 'Checklist per Site')); break;
     case 'site': CUR_SITE = b.dataset.k; render(); window.scrollTo(0, 0); break;
     case 'blank': exportWord(a, blankChecklistHTML(a, $('#optGuide').checked, $('#optCrit').checked), fileBase(a, 'Checklist Audit')); break;
@@ -6896,6 +7063,8 @@ function onField(e){
   } else if (el.dataset.site) {
     const [i, f] = el.dataset.site.split('|'); a.profil.sites[+i][f] = el.value; save();
     if (f === 'type') { if (el.value !== 'prodi') a.profil.sites[+i].jenjang = ''; const y = window.scrollY; render(); window.scrollTo(0, y); }
+  } else if (el.dataset.snote) {
+    const [k, f] = el.dataset.snote.split('|'); a.res[k] = a.res[k] || { items:{}, unit:'' }; a.res[k][f] = el.value; save();
   } else if (el.dataset.unit) {
     a.res[el.dataset.unit] = a.res[el.dataset.unit] || { items:{}, unit:'' }; a.res[el.dataset.unit].unit = el.value; save();
   } else if (el.dataset.act === 'navfilter') {
