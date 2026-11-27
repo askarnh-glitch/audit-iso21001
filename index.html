@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="id">
 <head>
-<meta name="build" content="20261128063501">
+<meta name="build" content="20261128064847">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Audit ISO 21001</title>
@@ -6313,10 +6313,17 @@ function vSite(a){
     return `<div class="item ${rr.cat ? CAT[rr.cat].cls : ''}" id="it-${esc(b.cl.k.replace(/\./g, '_'))}-${it.i}">
       <div class="q"><span class="qn">${n + 1}</span><div><span class="sref">${esc(x.k)}</span>${q9 ? '<span class="tag q9">ISO 9001</span>' : ''}<div style="margin-top:4px">${qText}</div></div></div>
       ${meta}
+      ${siteGuideHTML(b.cl.k, it.i, x)}
       <div class="cats">${btns}</div>
+      ${siteCritHTML(b.cl.k, it.i, x, rr.cat)}
       <textarea class="inp" rows="${Math.min(10, Math.max(2, String(rr.bukti || '').split('\n').length))}" data-item="${esc(b.cl.k)}|${it.i}|bukti" placeholder="Catatan auditor: bukti objektif, dokumen & nomor, personel yang diwawancarai…">${esc(rr.bukti || '')}</textarea>
     </div>`;
   }).join('');
+  const hasGuide = (b.cl.ind ? r.indikasi.rows : st.rows).some(x => (x.tek && x.tek.length) || (x.ops && x.ops.length) || x.kr);
+  const tools = hasGuide ? `<div class="row" style="gap:6px;margin-top:10px"><span class="note">Tampilkan:</span>
+      <button class="btn sm tgl ${UI.gdTek ? 'on' : ''}" data-act="gdTgl" data-v="gdTek" title="Buka/tutup semua kotak pertanyaan teknis">🛠 Teknis</button>
+      <button class="btn sm tgl ${UI.gdOps ? 'on' : ''}" data-act="gdTgl" data-v="gdOps" title="Buka/tutup semua kotak pertanyaan operasional">👥 Operasional</button>
+      <button class="btn sm" data-act="critAll">${UI.critOpen ? 'Tutup' : 'Buka'} panduan penilaian</button></div>` : '';
   const prev = blocks[bi - 1], next = blocks[bi + 1];
   const info = b.cl.ind ? r.indikasi.intro : st.info;
   return `<div class="ck">
@@ -6325,6 +6332,7 @@ function vSite(a){
       <div class="chead"><span class="cno">${esc(b.cl.ind ? 'Ditelusuri dari situs' : st.no + (st.waktu ? ' · ' + st.waktu : ''))}</span>
         <div class="ctitle"><h2>${esc(b.cl.ind ? 'Potensi temuan dari situs resmi' : st.nama)}</h2>
           <div class="note">${s.total - s.none}/${s.total} ${b.cl.ind ? 'indikasi diverifikasi' : 'pertanyaan dinilai'} · ${esc(stdLabel(a))}</div></div></div>
+      ${tools}
       ${r.petunjuk && bi === 0 ? `<details class="sinfo"><summary>Cara memakai pertanyaan per site</summary>${mdLite(r.petunjuk)}</details>` : ''}
       ${info ? `<div class="sinfo">${mdLite(info)}</div>` : ''}
       ${rows}
@@ -6333,6 +6341,26 @@ function vSite(a){
         ${next ? `<button class="btn pri" data-act="site" data-k="${esc(next.cl.k)}">${esc(next.cl.t)} →</button>` : `<button class="btn pri" data-act="go" data-v="temuan">Ke Daftar Temuan →</button>`}
       </div>
     </div></section></div>`;
+}
+/** Kotak pertanyaan teknis & operasional untuk satu pertanyaan per site (x.tek, x.ops) */
+function siteGuideHTML(k, i, x){
+  const ref = esc(k) + '|' + i;
+  const li = q => `<li><span>${ea(q)}</span><button class="add" data-act="addnote" data-ref="${ref}" data-kind="q" data-v="${esc(q)}" title="Salin ke catatan">＋</button></li>`;
+  const box = (cls, open, title, sub, list) => list && list.length ? `<details class="gd ${cls}" ${open ? 'open' : ''}><summary>${title} <small>${sub} · ${list.length}</small></summary><ul>${list.map(li).join('')}</ul></details>` : '';
+  const h = box('gd-tek', UI.gdTek, '🛠 Pertanyaan teknis', 'pimpinan unit/pemilik proses', x.tek) + box('gd-ops', UI.gdOps, '👥 Pertanyaan operasional', 'staf/dosen/mahasiswa/cek lapangan', x.ops);
+  return h ? `<div class="gds">${h}</div>` : '';
+}
+/** Panduan kapan memilih tiap kategori (x.kr = {C, OBS, OFI, MIN, MAJ, NA}); baris bisa diklik untuk memilih */
+function siteKr(x){
+  const kr = x.kr || {}, pick = (v, d) => (v && v !== '—') ? v : d;
+  return { C:kr.C, OBS:kr.OBS, OFI:kr.OFI, MIN:pick(kr.MIN, CRIT_GEN.MAJ), MAJ:pick(kr.MAJ, CRIT_GEN.MAJ), NA:pick(kr.NA, CRIT_GEN.NA) };
+}
+function siteCritHTML(k, i, x, cur){
+  if (!x.kr) return '';
+  const c = siteKr(x);
+  const rows = CRIT_ORDER.filter(t => c[t]).map(t => `<div class="kr-row ${CAT[t].cls} ${cur === t ? 'on' : ''}" data-act="cat" data-k="${esc(k)}" data-i="${i}" data-v="${t}" title="Klik untuk memilih ${esc(CAT[t].t)}">
+      <span class="b ${CAT[t].cls}">${esc(CAT[t].s)}</span><span>${ea(c[t])}</span></div>`).join('');
+  return `<details class="kr" ${UI.critOpen ? 'open' : ''}><summary>Panduan penilaian — kapan memilih kategori${cur ? ` · terpilih: <b>${esc(CAT[cur].t)}</b>` : ''}</summary><div class="kr-b">${rows}</div></details>`;
 }
 function siteSummaryCard(a){
   const rows = siteBlocks(a).map(b => { const s = siteCount(a, b);
@@ -6353,6 +6381,13 @@ function siteTablesHTML(a, blank){
       const sub = b.cl.ind ? (x.site ? 'Site: ' + x.site + '. ' : '') + (x.v ? 'Verifikasi: ' + x.v : '') : (x.b ? 'Bukti/sampel: ' + x.b : '');
       h += `<tr><td style="${RS.tdc}">${n + 1}</td><td style="${RS.td}">${esc(x.k)}</td><td style="${RS.td}">${esc(mdPlain(b.cl.ind ? x.t : x.q))}${sub ? '<br><span style="font-size:8.5pt;color:#555">' + esc(mdPlain(sub)) + '</span>' : ''}</td>
         <td style="${blank ? RS.td + ';font-size:8.5pt' : RS.tdc}">${blank ? '☐C ☐Obs ☐OFI<br>☐Mi ☐Ma ☐NA' : catCell(rr.cat)}</td><td style="${RS.td}">${blank ? '' : nl2br(rr.bukti)}</td></tr>`;
+      if (blank) {
+        const ul = arr => `<ul style="margin:0 0 3pt 14pt;padding:0">${arr.map(q => `<li style="margin:0">${esc(q)}</li>`).join('')}</ul>`;
+        if (x.tek && x.tek.length) h += `<tr><td style="${RS.td}"></td><td style="${RS.td};font-size:8.5pt;background:#f4faf6" colspan="4"><b>Pertanyaan teknis</b> (pimpinan unit/pemilik proses):${ul(x.tek)}</td></tr>`;
+        if (x.ops && x.ops.length) h += `<tr><td style="${RS.td}"></td><td style="${RS.td};font-size:8.5pt;background:#fdf8ef" colspan="4"><b>Pertanyaan operasional</b> (staf/dosen/mahasiswa/cek lapangan):${ul(x.ops)}</td></tr>`;
+        if (x.kr) { const c = siteKr(x); h += `<tr><td style="${RS.td}"></td><td style="${RS.td};font-size:8.5pt;background:#fffdf5" colspan="4"><b>Panduan penilaian:</b><table style="width:100%;border-collapse:collapse;margin-top:2pt">${CRIT_ORDER.filter(t => c[t]).map(t =>
+          `<tr><td style="border:0;padding:1pt 4pt 1pt 0;vertical-align:top;width:13%;font-size:8.5pt;color:${CAT_COLOR[t]}"><b>${esc(CAT[t].s)}</b></td><td style="border:0;padding:1pt 0;vertical-align:top;font-size:8.5pt">${esc(c[t])}</td></tr>`).join('')}</table></td></tr>`; }
+      }
     });
     h += `</table>`;
   });
